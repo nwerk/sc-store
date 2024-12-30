@@ -1,10 +1,14 @@
 (
 s.waitForBoot {
-    ~ccBuses = Bus.control(s, 128);
+	~ccBuses = Bus.control(s, 128);
     ~ccBuses.setn(Array.fill(128, 0.0));
 
-    ~latchingCCs = [79, 80, 81, 82, 83, 84];
-    ~latchingStates = Array.fill(128, 0);
+	// get all latching CC's
+	~latchingCCs  = ~busNames.keys.asArray
+	.select { |k| (~busNames[k][\isLatch] == true) }
+	.collect { |k| ~busNames[k][\index] };
+
+	~latchingStates = Array.fill(128, 0);
 
     MIDIClient.init;
     MIDIIn.connectAll;
@@ -26,4 +30,3 @@ s.waitForBoot {
     "Config file loaded!".postln;
 };
 )
-

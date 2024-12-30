@@ -1,22 +1,24 @@
 (
 SynthDef(\scramble, {
 			var sig, chain, size=512, chain2, sig2, del, ccBus = 0;
-			var ccVals = In.kr(ccBus, 82);
-			var vol = Select.kr(82, ccVals);
+			var ccVals = In.kr(ccBus, 128);
+			var vol = Select.kr(~busNames[\scramble_vol].index, ccVals);
+			var dist = Select.kr(~busNames[\scramble_dist].index, ccVals);
+			vol.poll;
 
 			sig = SoundIn.ar(0);
 			//sig = PlayBuf.ar(1, \buf.kr(0), BufRateScale.ir(\buf.kr(0)), loop:1);
 			chain = FFT(LocalBuf(size), sig);
 			chain2 = PV_BinScramble(
 				buffer: chain,
-				wipe: MouseX.kr(0,1),
-				width: MouseX.kr(0,0.2), //MouseY.kr(0, 0.5).poll,
+				wipe: dist.linlin(0, 1, 0, 0.6),
+				width: dist.linlin(0, 1, 0.02, 0.2), //MouseY.kr(0, 0.5).poll,
 				trig: \trig.tr()
 			);
 			chain = PV_BinScramble(
 				buffer: chain,
-				wipe: MouseX.kr(0,1).(0, 1, 0, 1),
-				width: MouseX.kr(0,0.2), //MouseY.kr(0, f0.5).poll,
+				wipe: dist.linlin(0, 1, 0, 0.6),
+				width: dist.linlin(0, 1, 0, 0.2), //MouseY.kr(0, f0.5).poll,
 				trig: \trig.tr()
 			);
 
