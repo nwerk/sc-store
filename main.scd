@@ -2,8 +2,10 @@
 Server.default.options.sampleRate = 48000;
 //s.options.device = "ASIO";
 //////// IMPOTRTS ///////////////////
-thisProcess.interpreter.executeFile("C:/Users/phi_n/Documents/Programming/SuperCollider/NN_Synth_Control/midi/midiconfig.scd");
-thisProcess.interpreter.executeFile("C:/Users/phi_n/Documents/Programming/SuperCollider/NN_Synth_Control/synths/scramble.scd");
+
+~basePath = PathName(thisProcess.nowExecutingPath).pathOnly;
+thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig.scd");
+thisProcess.interpreter.executeFile(~basePath ++ "synths/scramble.scd");
 
 
 SystemClock.sched(7, {
