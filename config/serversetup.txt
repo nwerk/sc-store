@@ -1,0 +1,6 @@
+(
+Server.default.options.sampleRate = 48000;
+Server.default.options.blockSize = 8;
+s.meter;
+s.options.device = "Focusrite USB ASIO";
+)
