@@ -14,7 +14,7 @@
     param13:  ( index:13 ),
     param14:  ( index:14 ),
     param15:  ( index:15 ),
-    param16:  ( index:16 ),
+    wavemix:  ( index:16 ),
     param17:  ( index:17 ),
     badness:  ( index:18 ),
     param19:  ( index:19 ),
@@ -128,3 +128,4 @@
     param127: ( index:127 ),
     param128: ( index:128 )
 );
+"Bus names and their corresponding CC indices defined.".postln;
