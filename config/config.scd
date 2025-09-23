@@ -16,7 +16,7 @@
     param15:  ( index:15 ),
     param16:  ( index:16 ),
     param17:  ( index:17 ),
-    param18:  ( index:18 ),
+    badness:  ( index:18 ),
     param19:  ( index:19 ),
     param20:  ( index:20 ),
     param21:  ( index:21 ),
