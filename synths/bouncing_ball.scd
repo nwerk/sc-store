@@ -1,6 +1,6 @@
 SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.45,  loss=0.7, amp=0.9, stopFreq=800, fadeTime=3.0, pan=0, contactPitch=1000, rateMultiplier=1|
     var stopPeriod, initialInterval, t, interval, freq, mask, impact, dense, env, sig, envTrig, denseFiltered;
-    var denseFreq, filterMask, cutoff, freqRate, ampScale, tEff, intervalNoAccel, freqNoAccel, fastMask, norm, gentle;
+    var denseFreq, filterMask, cutoff, freqRate, ampScale, tEff, intervalNoAccel, freqNoAccel, fastMask, norm, gentle, iceCube, denseIce;
     var gravity = 9.81;
         stopPeriod = 1.0 / stopFreq;
         initialInterval = 2 * (height / gravity).sqrt.max(0.0001);
@@ -32,33 +32,48 @@ SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.45,  loss=0.7, amp
         falloff = falloff.clip(0.0001, 1);
         gentle = norm.pow(falloff); // exponent < 1 => slower falloff
         ampScale = amp * LinLin.kr(gentle, 0.0, 1.0, 0.05, 1.0).clip(0.05, 1.0);
-        impact = BPF.ar(Decay2.ar(Impulse.ar(freq), 0.001, 0.05) * ampScale, contactPitch, 0.3);
-        dense = Decay2.ar(Impulse.ar(stopFreq), 0.001, 0.02) * (ampScale);
+        // Ice cube contact sound: sharp attack with glassy harmonics
+        iceCube = {
+            var excitation = Decay2.ar(Impulse.ar(freq), 0.0001, 0.003) * WhiteNoise.ar(0.3);
+            var glass1 = Ringz.ar(excitation, contactPitch, 0.8) * 0.6;
+            var glass2 = Ringz.ar(excitation, contactPitch * 1.618, 0.6) * 0.4; // golden ratio harmonic
+            var glass3 = Ringz.ar(excitation, contactPitch * 2.414, 0.4) * 0.3; // crystal-like harmonic
+            var tinkle = HPF.ar(excitation * 2, 2000) * Decay.ar(Impulse.ar(freq), 0.1);
+            (glass1 + glass2 + glass3 + tinkle) * ampScale;
+        };
+        impact = iceCube.value;
+        // Dense phase: softer glass rattling
+        denseIce = {
+            var rattle = Decay2.ar(Impulse.ar(stopFreq), 0.001, 0.05) * PinkNoise.ar(0.2);
+            var glassRattle = Ringz.ar(rattle, contactPitch * 0.8, 0.3) * 0.7;
+            glassRattle * ampScale;
+        };
+        dense = denseIce.value;
         cutoff = contactPitch.clip(80, 12000); // cutoff tracks contactPitch, safe range
-        denseFiltered = LPF.ar(dense, cutoff);
+        denseFiltered = dense; // no additional filtering needed
         sig = (mask * impact) + ((1 - mask) * denseFiltered * env);
         Out.ar(out, Pan2.ar(sig, pan));
 }).add;
 
-// Example: Randomly trigger bouncingBallSmooth with random height, stop frequency, stereo pan, and contact pitch
-s.waitForBoot {
-    // Define a scale (e.g. C major) and convert to Hz
-    var scale = Scale.lydian.degrees;
-    var root = 46; // MIDI note number for C3
-    var octaves = [0, 12, 24, 36];
-    var notes = scale.collect({ |deg| octaves.collect({ |oct| deg + root + oct }) }).flat;
-    var freqs = notes.collect({ |n| n.midicps });
-    
-    Pbind(
-        \instrument, \bouncingBallSmooth,
-        \height, Pwhite(2, 10.0),           // height in meters (safe: 0.5 to 6)
-        \gravity, 9.81,
-        \loss, Pwhite(0.6, 0.9),               // loss factor (safe: 0.5 to 0.9)
-        \amp, 0.8,
-        \stopFreq, Pseq(freqs, inf),         // stop frequency from scale (Hz)
-        \fadeTime, Pwhite(0.5, 9.5),         // fade time in seconds
-        \pan, Pwhite(-1.0, 1.0),             // stereo pan
-        \contactPitch, (Pseq(freqs, inf)) * 4,     // contact pitch from scale (Hz)
-        \dur, Pwhite(2, 4)                  // time between triggers
-    ).play;
-};
+//// Example: Randomly trigger bouncingBallSmooth with random height, stop frequency, stereo pan, and contact pitch
+//s.waitForBoot {
+//    // Define a scale (e.g. C major) and convert to Hz
+//    var scale = Scale.lydian.degrees;
+//    var root = 46; // MIDI note number for C3
+//    var octaves = [0, 12, 24, 36];
+//    var notes = scale.collect({ |deg| octaves.collect({ |oct| deg + root + oct }) }).flat;
+//    var freqs = notes.collect({ |n| n.midicps });
+//    
+//    Pbind(
+//        \instrument, \bouncingBallSmooth,
+//        \height, Pwhite(2, 10.0),           // height in meters (safe: 0.5 to 6)
+//        \gravity, 9.81,
+//        \loss, Pwhite(0.6, 0.9),               // loss factor (safe: 0.5 to 0.9)
+//        \amp, 0.8,
+//        \stopFreq, Pseq(freqs, inf),         // stop frequency from scale (Hz)
+//        \fadeTime, Pwhite(0.5, 9.5),         // fade time in seconds
+//        \pan, Pwhite(-1.0, 1.0),             // stereo pan
+//        \contactPitch, (Pseq(freqs, inf)) * 4,     // contact pitch from scale (Hz)
+//        \dur, Pwhite(2, 4)                  // time between triggers
+//    ).play;
+//};
