@@ -2,10 +2,12 @@
 // Tape-like delay effect with low added latency (uses a short internal delay for modulation but
 // simulates long tape feel via feedback, saturation and filtering rather than huge real-time buffer)
 (
-SynthDef(\TapeSignal, { |inBus = 0, outBus = 0, ccBus = 0, mix = 0.5, delayTime = 0.2, maxDelay = 1.0, feedback = 0.3,
+SynthDef(\TapeSignal, { |inBus = 0, outBus = 0, ccBus = 0, delayTime = 0.2, maxDelay = 1.0, feedback = 0.3,
 	wowRate = 0.2, wowDepth = 0.002, flutterRate = 8.0, flutterDepth = 0.0005,
 	saturation = 0.8, headCut = 800, headQ = 1.0|
 	
+	var ccVals = In.kr(ccBus, 128);
+	var mix = Select.kr(~busNames[\mix].index, ccVals);
 	// Input
 	var inSig = In.ar(inBus, 2);
 	var sig = inSig;
