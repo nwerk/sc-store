@@ -1,4 +1,4 @@
-SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.45,  loss=0.7, amp=0.9, stopFreq=800, fadeTime=3.0, pan=0, contactPitch=1000, rateMultiplier=1|
+SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.55,  loss=0.7, amp=0.9, stopFreq=800, fadeTime=3.0, pan=0, contactPitch=1000, rateMultiplier=1|
     var stopPeriod, initialInterval, t, interval, freq, mask, impact, dense, env, sig, envTrig, denseFiltered;
     var denseFreq, filterMask, cutoff, freqRate, ampScale, tEff, intervalNoAccel, freqNoAccel, fastMask, norm, gentle, iceCube, denseIce;
     var gravity = 9.81;
@@ -52,7 +52,8 @@ SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.45,  loss=0.7, amp
         cutoff = contactPitch.clip(80, 12000); // cutoff tracks contactPitch, safe range
         denseFiltered = dense; // no additional filtering needed
         sig = (mask * impact) + ((1 - mask) * denseFiltered * env);
-        Out.ar(out, Pan2.ar(sig, pan));
+        sig = Pan2.ar(sig, pan);
+        Out.ar(out, sig);
 }).add;
 
 //// Example: Randomly trigger bouncingBallSmooth with random height, stop frequency, stereo pan, and contact pitch
