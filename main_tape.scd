@@ -3,7 +3,7 @@ Server.killAll;
 //////// IMPOTRTS ///////////////////
 ~basePath = PathName(thisProcess.nowExecutingPath).pathOnly;
 thisProcess.interpreter.executeFile(~basePath ++ "config/serversetup.scd");
-thisProcess.interpreter.executeFile(~basePath ++ "config/config.scd");
+thisProcess.interpreter.executeFile(~basePath ++ "midi/mappings/tape_fx_midi.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/tapeemulate.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "classes/inputtracker.scd");
