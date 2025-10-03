@@ -1,7 +1,7 @@
 // Tartini tracker tuned like sigmund~ behaviour
 (
 SynthDef(\tartiniTracker_sigmundStyle, { |inChan=0, freqBus=0, ampBus=1,
-    inGain=2.0, hpFreq=50, execFreq=60, minFreq=30, maxFreq=2000,
+    inGain=2.0, hpFreq=5, lpFreq=2000, execFreq=60, 
     ampMapMax=0.08, lagTime=0.03, gateThreshold=0.0003, holdLast=0|  // 0 = original behaviour; 1 = hold last valid frequency when invalid
     var sig, pre, ampRMS, ampMapped;
     var t, freqRaw, mag;
@@ -10,11 +10,12 @@ SynthDef(\tartiniTracker_sigmundStyle, { |inChan=0, freqBus=0, ampBus=1,
 
     sig = SoundIn.ar(inChan) * inGain;
     pre = HPF.ar(sig, hpFreq);              // remove subsonic noise
+    pre = LPF.ar(sig, lpFreq);              // remove subsonic noise
     ampRMS = Amplitude.kr(pre, 0.01, 0.01); // robust RMS measure
     ampMapped = ampRMS.linlin(0.0, ampMapMax, 0.0, 1.0).clip(0,1);
 
-    // Tartini returns [freq, magnitude]
-    t = Tartini.kr(pre, execFreq, minFreq, maxFreq);
+    // Tartini returns [freq, magnitude]; use default analysis settings
+    t = Tartini.kr(pre);
     freqRaw = t[0] ?? 0;
     mag     = t[1] ?? 0;
 
