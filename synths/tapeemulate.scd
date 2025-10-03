@@ -1,14 +1,18 @@
 (
 "Try Instantiate".postln;
 SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
-			var sig, pitch, ccVals, badness, wavemix = 1, sine, saw;
+			var sig, pitch, ccVals, badness, wavemix = 0, sine, saw;
 			var noiseL, noiseR, volSig, pitchSig, reverbSig;
-
+			var reverb_mix, reverb_room;
 			volSig = In.kr(vol);
 			pitchSig = In.kr(input_pitch);
 			ccVals = In.kr(ccBus, 128);
+
 			badness = Select.kr(~busNames[\badness].index, ccVals);
 			wavemix = Select.kr(~busNames[\wavemix].index, ccVals);
+
+			reverb_mix = Select.kr(~busNames[\reverb_mix].index, ccVals);
+			reverb_room = Select.kr(~busNames[\reverb_room].index, ccVals);
 
 			noiseL = WhiteNoise.ar(1);
 			noiseR = WhiteNoise.ar(1);
@@ -31,7 +35,7 @@ SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
 			sig = wavemix * sine + (1 - wavemix) * saw;
 			sig = sig * volSig;
 			LocalOut.ar(sig);
-			reverbSig = FreeVerb.ar(sig, mix: 0.35, room: 0.9, damp: 0.5);
+			reverbSig = FreeVerb.ar(sig, mix: reverb_mix, room: reverb_room, damp: 0.5);
 
 			Out.ar(\out.kr(0), reverbSig);
 		}).add;
