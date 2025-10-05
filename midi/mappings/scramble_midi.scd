@@ -1,12 +1,12 @@
 ~busNames = (
-    param1:   ( index:1 ),
-    param2:   ( index:2 ),
-    param3:   ( index:3 ),
-    param4:   ( index:4 ),
-    param5:   ( index:5 ),
-    param6:   ( index:6 ),
-    param7:   ( index:7 ),
-    param8:   ( index:8 ),
+    param1:   ( index:1 ), // knob ch1
+    param2:   ( index:2 ), // knob ch2
+    param3:   ( index:3 ), // knob ch3
+    param4:   ( index:4 ), // knob ch4
+    param5:   ( index:5 ), // knob ch2 (bank 2)
+    param6:   ( index:6 ), // knob ch6
+    param7:   ( index:7 ), // knob ch7
+    param8:   ( index:8 ), // knob ch8
     param9:   ( index:9 ),
     param10:  ( index:10 ),
     scramble_dist:  ( index:11 ),
@@ -15,37 +15,37 @@
     param14:  ( index:14 ),
     param15:  ( index:15 ),
     param16:  ( index:16 ),
-    param17:  ( index:17 ),
+    param17:  ( index:17 ), // knob ch5 (bank 2)
     param18:  ( index:18 ),
-    param19:  ( index:19 ),
+    param19:  ( index:19 ), // fader ch1
     param20:  ( index:20 ),
-    param21:  ( index:21 ),
+    param21:  ( index:21 ), // knob ch6 (bank 2)
     param22:  ( index:22 ),
-    param23:  ( index:23 ),
+    param23:  ( index:23 ), // fader ch2
     param24:  ( index:24 ),
-    param25:  ( index:25 ),
+    param25:  ( index:25 ), // knob ch7 (bank 2)
     param26:  ( index:26 ),
-    param27:  ( index:27 ),
+    param27:  ( index:27 ), // fader ch3
     param28:  ( index:28 ),
-    param29:  ( index:29 ),
+    param29:  ( index:29 ), // knob ch8 (bank 2)
     param30:  ( index:30 ),
-    param31:  ( index:31 ),
+    param31:  ( index:31 ), // fader ch4
     param32:  ( index:32 ),
     param33:  ( index:33 ),
     param34:  ( index:34 ),
-    param35:  ( index:35 ),
+    param35:  ( index:35 ), // fader ch5
     param36:  ( index:36 ),
     param37:  ( index:37 ),
     param38:  ( index:38 ),
-    param39:  ( index:39 ),
+    param39:  ( index:39 ), // fader ch6
     param40:  ( index:40 ),
     param41:  ( index:41 ),
     param42:  ( index:42 ),
-    param43:  ( index:43 ),
+    param43:  ( index:43 ), // fader ch7
     param44:  ( index:44 ),
     param45:  ( index:45 ),
     param46:  ( index:46 ),
-    param47:  ( index:47 ),
+    param47:  ( index:47 ), // fader ch8
     param48:  ( index:48 ),
     param49:  ( index:49 ),
     param50:  ( index:50 ),
@@ -78,11 +78,11 @@
     param77:  ( index:77 ),
     param78:  ( index:78 ),
     param79:  ( index:79 ),
-    scramble_vol:  ( index:80, isLatch:true ),
-    param81:  ( index:81 ),
-    param82:  ( index:82 ),
-    param83:  ( index:83 ),
-    param84:  ( index:84 ),
+    scramble_vol:  ( index:80, isLatch:true ), // Boss FS-1-WH footswitch 1
+    param81:  ( index:81 ), // Boss FS-1-WH footswitch 2
+    param82:  ( index:82 ), // Boss FS-1-WH footswitch 3
+    param83:  ( index:83 ), // Boss FS-1-WH footswitch 4
+    param84:  ( index:84 ), // Boss FS-1-WH expression pedal
     param85:  ( index:85 ),
     param86:  ( index:86 ),
     param87:  ( index:87 ),
