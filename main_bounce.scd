@@ -2,36 +2,35 @@ Server.killAll;
 //////// IMPOTRTS ///////////////////
 ~basePath = PathName(thisProcess.nowExecutingPath).pathOnly;
 thisProcess.interpreter.executeFile(~basePath ++ "config/serversetup.scd");
-thisProcess.interpreter.executeFile(~basePath ++ "config/config.scd");
+thisProcess.interpreter.executeFile(~basePath ++ "midi/mappings/bouncing_ball_midi.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/bouncing_ball.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "classes/inputtracker.scd");
 s.waitForBoot{
-    // Define a scale (e.g. C major) and convert to Hz
-    var scale = Scale.harmonicMinor.degrees;
-    var root = 46; // MIDI note number for C3
-    var octaves = [0, 12, 24];
-    var notes = scale.collect({ |deg| octaves.collect({ |oct| deg + root + oct }) }).flat;
-    var freqs = notes.collect({ |n| n.midicps });
     ~freqBus = Bus.control(s, 1);
 	~lagAmpBus = Bus.control(s, 1);
 
     Synth(\tartiniTracker_sigmundStyle, [\inChan, 0, \freqBus, ~freqBus, \lagAmpBus, ~ampBus, \holdLast, 1]);
     
-    Pbind(
-        \instrument, \bouncingBallSmooth,
-        \height, Pwhite(1, 4.0),           // height in meters (safe: 0.5 to 6)
-        \gravity, 9.81,
-        \loss, Pwhite(0.3, 0.7),               // loss factor (safe: 0.5 to 0.9)
-        \amp, 0.8,
-    // snapshot the bus once per event (no continuous modulation)
-    \stopFreq, Pfunc { ~freqBus.getSynchronous },         // stop frequency from scale (Hz)
-        \fadeTime, Pwhite(2.5, 6.5),         // fade time in seconds
-        \pan, Pwhite(-1.0, 1.0),             // stereo pan
-    \contactPitch, Pfunc { ~freqBus.getSynchronous },     // contact pitch from scale (Hz)
-        \dur, Pfunc {
-            var v = ~lagAmpBus.getSynchronous.clip(0, 1);  // 0..1 avg amplitude
-            v.clip(0.001, 1).explin(0.001, 1, 8.0, 0.5);
-        }
-    ).play;
-}
+    MIDIdef.cc(\bounceTrigger, { |val, ccNum, chan, src|
+    var trigIndex = if(
+        ~busNames.notNil and: { ~busNames[\trigger].notNil and: { ~busNames[\trigger][\index].notNil } }
+    ) { ~busNames[\trigger][\index] } { 81 };
+
+    if (ccNum == trigIndex and: { val == 127 }) {
+        // Read freq once (falls back if not ready)
+        var f = if(~freqBus.notNil) { ~freqBus.getSynchronous } { 440 };
+        Synth(\bouncingBallSmooth, [
+            \height, 1.0.rrand(4.0),
+            \loss, 0.3.rrand(0.7),
+            \fadeTime, 2.5.rrand(6.5),
+            \pan, (-1.0).rrand(1.0),
+            \amp, 0.8,
+            \stopFreq, f,
+            \contactPitch, f,
+            \rateMultiplier, 1
+        ]);
+        "Synth triggered!".postln;
+    };
+    });
+};

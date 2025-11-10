@@ -78,7 +78,7 @@
     param77:  ( index:77 ),
     param78:  ( index:78 ),
     param79:  ( index:79 ),
-    vol:  ( index:80, isLatch:true ), // Boss FS-1-WH footswitch 1
+    trigger:  ( index:80 ), // Boss FS-1-WH footswitch 1
     param81:  ( index:81 ), // Boss FS-1-WH footswitch 2
     param82:  ( index:82 ), // Boss FS-1-WH footswitch 3
     param83:  ( index:83 ), // Boss FS-1-WH footswitch 4
