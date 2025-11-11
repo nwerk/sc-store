@@ -15,7 +15,6 @@ s.waitForBoot{
 	"Synth \tartiniTracker_sigmundStyle created!".postln;
 	Synth(\ape, [\ccBus, ~ccBuses, \input_pitch, ~freqBus.index, \vol, ~ampBus.index]);
 	"Synth ape created!".postln;
-	
 }
 )
 
