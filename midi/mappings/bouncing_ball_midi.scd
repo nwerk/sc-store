@@ -9,7 +9,7 @@
     param8:   ( index:8 ), // knob ch8
     param9:   ( index:9 ),
     param10:  ( index:10 ),
-    param11:  ( index:11 ),
+    master_vol:  ( index:11 ),
     param12:  ( index:12 ),
     param13:  ( index:13 ),
     param14:  ( index:14 ),
@@ -82,7 +82,7 @@
     param81:  ( index:81 ), // Boss FS-1-WH footswitch 2
     param82:  ( index:82 ), // Boss FS-1-WH footswitch 3
     param83:  ( index:83 ), // Boss FS-1-WH footswitch 4
-    param84:  ( index:84 ), // Boss FS-1-WH expression pedal
+    param84: ( index:84 ), // Boss FS-1-WH expression pedal
     param85:  ( index:85 ),
     param86:  ( index:86 ),
     param87:  ( index:87 ),

@@ -1,4 +1,5 @@
-SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.55,  loss=0.7, amp=0.9, stopFreq=800, fadeTime=3.0, pan=0, contactPitch=1000, rateMultiplier=1|
+// Added pitchFocus arg to emphasize harmonic content (0=no extra focus, 1=very clear pitch)
+SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.55,  loss=0.7, amp=0.9, stopFreq=800, fadeTime=3.0, pan=0, contactPitch=1000, rateMultiplier=1, pitchFocus=0.7|
     var stopPeriod, initialInterval, t, interval, freq, mask, impact, dense, env, sig, envTrig, denseFiltered;
     var denseFreq, filterMask, cutoff, freqRate, ampScale, tEff, intervalNoAccel, freqNoAccel, fastMask, norm, gentle, iceCube, denseIce;
     var gravity = 9.81;
@@ -35,21 +36,37 @@ SynthDef(\bouncingBallSmooth, { |out=0, height=2.0, falloff=0.55,  loss=0.7, amp
         falloff = falloff.clip(0.0001, 1);
         gentle = norm.pow(falloff); // exponent < 1 => slower falloff
         ampScale = amp * LinLin.kr(gentle, 0.0, 1.0, 0.05, 1.0).clip(0.05, 1.0);
-        // Ice cube contact sound: sharp attack with glassy harmonics
+        // Ice cube contact sound: clearer harmonic stack + optional modal shimmer
         iceCube = {
-            var excitation = Decay2.ar(Impulse.ar(freq), 0.0001, 0.003) * WhiteNoise.ar(0.3);
-            var glass1 = Ringz.ar(excitation, contactPitchSafe, 0.8) * 0.6;
-            var glass2 = Ringz.ar(excitation, contactPitchSafe * 1.618, 0.6) * 0.4; // golden ratio harmonic
-            var glass3 = Ringz.ar(excitation, contactPitchSafe * 2.414, 0.4) * 0.3; // crystal-like harmonic
-            var tinkle = HPF.ar(excitation * 2, 2000) * Decay.ar(Impulse.ar(freq), 0.1);
-            (glass1 + glass2 + glass3 + tinkle) * ampScale;
+            var excitation = Decay2.ar(Impulse.ar(freq), 0.0001, 0.003) * WhiteNoise.ar(0.15 * (1 - pitchFocus));
+            // Integer harmonic ratios for clearer pitch
+            var freqsM = [1, 2, 3, 4] * contactPitchSafe;
+            var ampsM  = [0.9, 0.5, 0.33, 0.25];
+            var ringsM = [1.4, 1.1, 0.9, 0.8];
+            var modal = Klank.ar(Ref([freqsM, ampsM, ringsM]), excitation * (0.6 + 0.4 * pitchFocus));
+            // Add controlled harmonic sines (clean, no inharmonicity) scaled by pitchFocus
+            var harmStack = Mix.fill(4, { |i|
+                var h = i + 1;
+                SinOsc.ar(contactPitchSafe * h, 0, (pitchFocus * 0.2) / h);
+            });
+            var sheen = HPF.ar(excitation * 2, 2500) * 0.15 * (1 - pitchFocus); // noise sheen fades as pitchFocus rises
+            (modal + harmStack + sheen) * ampScale;
         };
         impact = iceCube.value;
-        // Dense phase: softer glass rattling
+        // Dense phase: clearer sustained pitch using shorter modal tails + harmonic bed crossfaded by pitchFocus
         denseIce = {
-            var rattle = Decay2.ar(Impulse.ar(stopFreqSafe), 0.001, 0.05) * PinkNoise.ar(0.2);
-            var glassRattle = Ringz.ar(rattle, contactPitchSafe * 0.8, 0.3) * 0.7;
-            glassRattle * ampScale;
+            var rattle = Decay2.ar(Impulse.ar(stopFreqSafe), 0.001, 0.04) * PinkNoise.ar(0.15 * (1 - pitchFocus));
+            var freqsD = [1, 2, 3, 4] * contactPitchSafe * 0.97; // slightly darker fundamental bias
+            var ampsD  = [0.5, 0.35, 0.25, 0.18];
+            var ringsD = [0.22, 0.18, 0.14, 0.12]; // tighter for density
+            var modal = Klank.ar(Ref([freqsD, ampsD, ringsD]), rattle * (0.5 + 0.5 * pitchFocus));
+            var harmBed = Mix.fill(4, { |i|
+                var h = i + 1;
+                SinOsc.ar(contactPitchSafe * h, 0, (0.08 * pitchFocus) / h);
+            });
+            // gentle lowpass to smooth harmonic bed, more filtering when pitchFocus low
+            harmBed = LPF.ar(harmBed, LinLin.kr(pitchFocus, 0, 1, 1200, 8000));
+            (modal + harmBed) * ampScale;
         };
         dense = denseIce.value;
         cutoff = contactPitchSafe.clip(80, 12000); // cutoff tracks contactPitch, safe range
