@@ -3,7 +3,6 @@ Server.killAll;
 ~basePath = PathName(thisProcess.nowExecutingPath).pathOnly;
 thisProcess.interpreter.executeFile(~basePath ++ "config/serversetup.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "midi/mappings/bouncing_ball_midi.scd");
-thisProcess.interpreter.executeFile(~basePath ++ "midi/bouncing_ball_midi.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/bouncing_ball.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "classes/inputtracker.scd");
@@ -21,7 +20,7 @@ s.waitForBoot{
 
     // Single persistent master that consumes the bouncingBall bus
     ~masterSynth = Synth(\master, [\inBus, ~bouncingBallBus, \ccBus, ~ccBuses]);
-    
+
     MIDIdef.cc(\bounceTrigger, { |val, ccNum, chan, src|
     var trigIndex = if(
         ~busNames.notNil and: { ~busNames[\trigger].notNil and: { ~busNames[\trigger][\index].notNil } }
