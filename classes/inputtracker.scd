@@ -1,12 +1,13 @@
 // Tartini tracker tuned like sigmund~ behaviour
 (
-SynthDef(\tartiniTracker_sigmundStyle, { |inChan=0, freqBus=0, ampBus=1,
+SynthDef(\tartiniTracker_sigmundStyle, { |inChan=0, freqBus=0, ampBus=1, lagAmpBus=2, ampAvgWindowSec=10,
     inGain=2.0, hpFreq=5, lpFreq=2000, execFreq=60, 
-    ampMapMax=0.08, lagTime=0.03, gateThreshold=0.0003, holdLast=0|  // 0 = original behaviour; 1 = hold last valid frequency when invalid
+    ampMapMax=0.08, lagTime=0.03, gateThreshold=0.03, holdLast=0|  // 0 = original behaviour; 1 = hold last valid frequency when invalid
     var sig, pre, ampRMS, ampMapped;
     var t, freqRaw, mag;
     var valid, trigValid, freqLatched;
     var freqSm_base, freqSm_hold, freqOut, ampSm;
+    var nSamp, lagAmpSm;
 
     sig = SoundIn.ar(inChan) * inGain;
     pre = HPF.ar(sig, hpFreq);              // remove subsonic noise
@@ -32,11 +33,18 @@ SynthDef(\tartiniTracker_sigmundStyle, { |inChan=0, freqBus=0, ampBus=1,
     freqOut     = Select.kr(holdLast.clip(0,1), [freqSm_base, freqSm_hold]);
 
     ampSm  = Lag.kr(ampMapped, lagTime);
+    // 10s moving average (boxcar) at control rate
+    // N = ampAvgWindowSec * ControlRate; average = RunningSum/N
+    nSamp = (ampAvgWindowSec.max(0.001) * ControlRate.ir);
+    lagAmpSm = (RunningSum.kr(ampMapped, nSamp) / nSamp).clip(0, 1);
+
 
     Out.kr(freqBus, freqOut);
     Out.kr(ampBus,  ampSm);
+    Out.kr(lagAmpBus,  lagAmpSm);
 
-    freqSm_hold.poll(1, "tartini_freqHz");
+    //freqSm_hold.poll(1, "tartini_freqHz");
     //ampSm.poll(1, "tartini_amp");
+    lagAmpSm.poll(1, "tartini_window_amp");
 }).add;
 )

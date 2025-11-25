@@ -36,6 +36,7 @@
 
 
 ~connect_midi_devices.("MIDI Mix", "MIDI Mix MIDI 1"); // test it now
+~connect_midi_devices.("FS-1-WL USB-MIDI", "FS-1-WL USB-MIDI MIDI 1"); // test it now
 
 MIDIdef.trace(true);
 MIDIdef.cc(
