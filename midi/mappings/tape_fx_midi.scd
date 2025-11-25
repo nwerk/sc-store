@@ -9,14 +9,14 @@
     param8:   ( index:8 ), // knob ch8
     param9:   ( index:9 ),
     param10:  ( index:10 ),
-    scramble_dist:  ( index:11 ),
+    param11:  ( index:11 ),
     param12:  ( index:12 ),
     param13:  ( index:13 ),
     param14:  ( index:14 ),
     param15:  ( index:15 ),
-    param16:  ( index:16 ),
+    badness:  ( index:16 ),
     param17:  ( index:17 ), // knob ch5 (bank 2)
-    param18:  ( index:18 ),
+    wavemix:  ( index:18 ),
     param19:  ( index:19 ), // fader ch1
     param20:  ( index:20 ),
     param21:  ( index:21 ), // knob ch6 (bank 2)
@@ -27,7 +27,7 @@
     param26:  ( index:26 ),
     param27:  ( index:27 ), // fader ch3
     param28:  ( index:28 ),
-    param29:  ( index:29 ), // knob ch8 (bank 2)
+    reverb_mix:  ( index:29 ), // knob ch8 (bank 2)
     param30:  ( index:30 ),
     param31:  ( index:31 ), // fader ch4
     param32:  ( index:32 ),
@@ -45,7 +45,7 @@
     param44:  ( index:44 ),
     param45:  ( index:45 ),
     param46:  ( index:46 ),
-    param47:  ( index:47 ), // fader ch8
+    reverb_room:  ( index:47 ), // fader ch8
     param48:  ( index:48 ),
     param49:  ( index:49 ),
     param50:  ( index:50 ),
@@ -60,7 +60,7 @@
     param59:  ( index:59 ),
     param60:  ( index:60 ),
     param61:  ( index:61 ),
-    param62:  ( index:62 ),
+    master:  ( index:62 ),
     param63:  ( index:63 ),
     param64:  ( index:64 ),
     param65:  ( index:65 ),
