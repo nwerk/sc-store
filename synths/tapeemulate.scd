@@ -24,7 +24,8 @@ SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
             //vol = MouseX.kr(0, 1);
     		//pitchSig.poll(1, "input_pitch");
     		//volSig.poll(1, "vol");
-			badness = badness * 3;
+			badness = badness * 7;
+			badness = badness * volSig; // Scale badness by volume control
 			badness.poll(1, "badness");
 			sig = [noiseL, noiseR];
 			sig = LPF.ar(sig, 100);
@@ -35,6 +36,7 @@ SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
 			sine = [SinOsc.ar(pitch[0], 0, 1), SinOsc.ar(pitch[1], 0, 1)];
 			saw = [LFSaw.ar(pitch[0], 0, 1), LFSaw.ar(pitch[1], 0, 1)];
 			saw = LPF.ar(saw, 1200);
+			wavemix = wavemix * volSig; // Scale wavemix by volume control
 			sig = wavemix * sine + (1 - wavemix) * saw;
 			sig = sig * volSig;
 			LocalOut.ar(sig);
