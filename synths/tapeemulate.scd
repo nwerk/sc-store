@@ -28,7 +28,7 @@ SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
 			badness.poll(1, "badness");
 			sig = [noiseL, noiseR];
 			sig = LPF.ar(sig, 100);
-			sig = sig + (LocalIn.ar(2, sig) * -1); // Use 2 channels for LocalIn
+			sig = sig + LeakDC.ar((LocalIn.ar(2, sig) * -1), 0.995); // Use 2 channels for LocalIn
 			sig = sig * badness;
 			pitch = sig * pitchSig * 0.25;
 			pitch = pitch + pitchSig;
