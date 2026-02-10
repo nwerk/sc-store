@@ -18,8 +18,8 @@
     param17:  ( index:17 ), // knob ch5 (bank 2)
     wavemix:  ( index:18 ),
     param19:  ( index:19 ), // fader ch1
-    param20:  ( index:20 ),
-    param21:  ( index:21 ), // knob ch6 (bank 2)
+    wavemap:  ( index:20 ),
+    badnessmap:  ( index:21 ), // knob ch6 (bank 2)
     param22:  ( index:22 ),
     param23:  ( index:23 ), // fader ch2
     param24:  ( index:24 ),
