@@ -28,18 +28,18 @@ s.waitForBoot {
 	]);
 
 	    
-    // Pbind(
-	// 	\instrument, \dynamicAdditiveSynth,
-	// 	\freq, Pseq([220, 246, 277, 329, 370, 415, 466, 523, 587, 659, 698, 784, 880, 987, 1046, 1175, 1318, 1397, 1568, 1760], inf).stutter(Pwhite(1, 4, inf)), // Chromatic scale, random repeats
-	// 	\envAmp, Pwhite(0.5, 0.8), // Random amplitude between 0.5 and 0.8
-	// 	\amp, 0.5,
-	// 	\minFreq, 50,
-	// 	\maxFreq, 1000,
-	// 	\minLPF, 500,
-	// 	\maxLPF, 5000,
-	// 	\reverbMix, 0.65,     // contact pitch from scale (Hz)
-    //     \dur, 0.4    
-	// ).play;
+Pbind(
+	\instrument, \dynamicAdditiveSynth,
+	\freq, Pseq([220, 246, 277, 329, 370, 415, 466, 523, 587, 659, 698, 784, 880, 987, 1046, 1175, 1318, 1397, 1568, 1760], inf).stutter(Pwhite(1, 4, inf)), // Chromatic scale, random repeats
+	\envAmp, Pwhite(0.5, 0.8), // Random amplitude between 0.5 and 0.8
+	\amp, 0.5,
+	\minFreq, 50,
+	\maxFreq, 1000,
+	\minLPF, 500,
+	\maxLPF, 5000,
+	\reverbMix, 0.65,     // contact pitch from scale (Hz)
+    \dur, 0.4    
+).play;
 
 
 	"Synth \dynamicAdditiveSynth created!".postln;

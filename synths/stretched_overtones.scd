@@ -10,20 +10,21 @@ SynthDef(\dynamicAdditiveSynth, { |ccBus=0, out=0, envBus=0, freqBus=0, envAmp=0
 
     envAmpVal = EnvGen.kr(Env.perc(0.01, 3.0), doneAction: 2) * envAmp;
     pitchFreq = freq;
-    stretch = MouseX.kr(1, 2);
-    maxDetune = MouseY.kr(0, 50); // Max detune controlled by mouse Y position
+    stretch = MouseX.kr(1, 1.5);
+    maxDetune = MouseY.kr(1, 10); // Max detune controlled by mouse Y position
     oscSum = Mix.fill(nOvertones, { |i|
         var overtone = i + 1;
         var stretchFactor = overtone * stretch;
-        var detune = envAmpVal * (maxDetune ** overtone);
-        var freq = (pitchFreq * overtone) + detune;
+        var detuneRatio = envAmpVal * maxDetune * 0.01; // percentage-based detune
+        var baseFreq = pitchFreq * overtone * stretchFactor;
+        var freq = baseFreq * (1 + detuneRatio);
         SinOsc.ar(freq) * (1 / nOvertones) * (1 / overtone);
     });
 
     lpfFreq = envAmpVal.linexp(0, 1, minLPF, maxLPF);
-    oscSum = LPF.ar(oscSum, lpfFreq);
-
+    oscSum = LPF.ar(oscSum, lpfFreq) ! 2;
+    oscSum = Pan2.ar(oscSum, rrand(-1, 1)); // Random pan for stereo spread
     reverbed = FreeVerb.ar(oscSum, mix: reverbMix, room: 0.94, damp: 0.5);
-    Out.ar(out, reverbed * envAmpVal * amp ! 2);
+    Out.ar(out, reverbed * envAmpVal * amp);
 }).add;
 )
