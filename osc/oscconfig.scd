@@ -13,23 +13,23 @@
 (1..5).do { |i|
 	// X position update
 	OSCdef(("kaossX" ++ i).asSymbol, { |msg|
-		~kaossCursorX[i] = msg[1].asFloat;
+		~kaossCursorX[i] = msg[1];
 		if (~kaossVoices[i].notNil) {
-			~kaossVoices[i].set(\padX, ~kaossCursorX[i]);
+			~kaossVoices[i].set(\padX, msg[1]);
 		};
 	}, "/multixy/" ++ i ++ "/x");
 
 	// Y position update
 	OSCdef(("kaossY" ++ i).asSymbol, { |msg|
-		~kaossCursorY[i] = msg[1].asFloat;
+		~kaossCursorY[i] = msg[1];
 		if (~kaossVoices[i].notNil) {
-			~kaossVoices[i].set(\padY, ~kaossCursorY[i]);
+			~kaossVoices[i].set(\padY, msg[1]);
 		};
 	}, "/multixy/" ++ i ++ "/y");
 
 	// Z (touch state) — spawn or release voice
 	OSCdef(("kaossZ" ++ i).asSymbol, { |msg|
-		var z = msg[1].asFloat;
+		var z = msg[1];
 		if (z > 0) {
 			// Touch down — spawn voice
 			if (~kaossVoices[i].isNil) {
@@ -57,13 +57,13 @@
 
 // Window size slider from TouchOSC
 OSCdef(\kaossWindow, { |msg|
-	~ccBuses.setAt(~busNames[\kaoss_window][\index], msg[1].asFloat);
+	~ccBuses.setAt(~busNames[\kaoss_window][\index], msg[1]);
 }, '/kaoss/window');
 
 // Volume control from TouchOSC fader
 OSCdef(\kaossVol, { |msg|
-	~ccBuses.setAt(~busNames[\kaoss_vol][\index], msg[1].asFloat);
+	~ccBuses.setAt(~busNames[\kaoss_vol][\index], msg[1]);
 }, '/kaoss/vol');
-
+OSCFunc.trace(true);
 "OSC config for Kaoss Pad loaded!".postln;
 )
