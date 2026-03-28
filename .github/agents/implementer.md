@@ -21,7 +21,7 @@ working SuperCollider code.
 | New MIDI mapping              | `midi/mappings/<patch>_midi.scd`       |
 | New main patch (entry point)  | `main_<name>.scd` (root directory)     |
 | Server configuration changes  | `config/serversetup.scd`               |
-| Production launcher script    | `run-sc-<name>.sh` or `run_<name>-sc.sh` (root) |
+| Production launcher script    | `run-sc-<name>.sh` (root directory)       |
 
 ### SynthDef patterns
 
