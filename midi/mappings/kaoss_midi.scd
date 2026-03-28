@@ -82,7 +82,7 @@
     kaoss_clear:  ( index:81, isLatch:true ), // FS-1-WL footswitch 2 — clears loop buffer
     param82:  ( index:82 ), // FS-1-WL footswitch 3 (reserved)
     param83:  ( index:83 ), // FS-1-WL footswitch 4 (reserved)
-    kaoss_speed: ( index:84 ), // FS-1-WL expression pedal — global playback speed
+    param84: ( index:84 ), // FS-1-WL expression pedal (unused)
     param85:  ( index:85 ),
     param86:  ( index:86 ),
     param87:  ( index:87 ),
@@ -99,7 +99,7 @@
     param98:  ( index:98 ),
     param99:  ( index:99 ),
     kaoss_vol: ( index:100 ), // Master volume for kaoss voices
-    param101: ( index:101 ),
+    kaoss_window: ( index:101 ), // Loop window size (TouchOSC slider)
     param102: ( index:102 ),
     param103: ( index:103 ),
     param104: ( index:104 ),

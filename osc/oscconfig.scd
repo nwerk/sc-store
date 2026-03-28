@@ -1,43 +1,64 @@
 (
 // Multi-touch voice management for Kaoss Pad
-// TouchOSC sends: /kaoss/touch [int:touchIndex, float:x, float:y, float:z]
-// z=1 on touch down/move, z=0 on touch up
+// TouchOSC Multi-XY sends per-cursor per-axis messages:
+//   /multixy/N/x float   (N = cursor index 1-5)
+//   /multixy/N/y float
+//   /multixy/N/z float   (1 = touch down, 0 = touch up)
 
 ~kaossVoices = Dictionary.new;
+~kaossCursorX = Array.fill(6, 0.5); // index 0 unused, 1-5 for cursors
+~kaossCursorY = Array.fill(6, 0.5);
 
-OSCdef(\kaossTouch, { |msg|
-	var touchIdx = msg[1].asInteger;
-	var x = msg[2].asFloat;
-	var y = msg[3].asFloat;
-	var z = msg[4].asFloat;
+// Register listeners for cursors 1 through 5
+(1..5).do { |i|
+	// X position update
+	OSCdef(("kaossX" ++ i).asSymbol, { |msg|
+		~kaossCursorX[i] = msg[1].asFloat;
+		if (~kaossVoices[i].notNil) {
+			~kaossVoices[i].set(\padX, ~kaossCursorX[i]);
+		};
+	}, "/multixy/" ++ i ++ "/x");
 
-	if (z > 0) {
-		// Touch down or move
-		if (~kaossVoices[touchIdx].notNil) {
-			// Update existing voice position and window
-			~kaossVoices[touchIdx].set(\padX, x, \padY, y);
+	// Y position update
+	OSCdef(("kaossY" ++ i).asSymbol, { |msg|
+		~kaossCursorY[i] = msg[1].asFloat;
+		if (~kaossVoices[i].notNil) {
+			~kaossVoices[i].set(\padY, ~kaossCursorY[i]);
+		};
+	}, "/multixy/" ++ i ++ "/y");
+
+	// Z (touch state) — spawn or release voice
+	OSCdef(("kaossZ" ++ i).asSymbol, { |msg|
+		var z = msg[1].asFloat;
+		if (z > 0) {
+			// Touch down — spawn voice
+			if (~kaossVoices[i].isNil) {
+				~kaossVoices[i] = Synth(\kaossVoice, [
+					\out, 0,
+					\buf, ~loopBuf,
+					\padX, ~kaossCursorX[i],
+					\padY, ~kaossCursorY[i],
+					\gate, 1,
+					\ccBus, ~ccBuses,
+					\amp, 0.5
+				]);
+				("Kaoss voice " ++ i ++ " spawned").postln;
+			};
 		} {
-			// Spawn new voice
-			~kaossVoices[touchIdx] = Synth(\kaossVoice, [
-				\out, 0,
-				\buf, ~loopBuf,
-				\padX, x,
-				\padY, y,
-				\gate, 1,
-				\ccBus, ~ccBuses,
-				\amp, 0.5
-			]);
-			("Kaoss voice " ++ touchIdx ++ " spawned").postln;
+			// Touch up — release voice
+			if (~kaossVoices[i].notNil) {
+				~kaossVoices[i].set(\gate, 0);
+				~kaossVoices.removeAt(i);
+				("Kaoss voice " ++ i ++ " released").postln;
+			};
 		};
-	} {
-		// Touch up — release voice
-		if (~kaossVoices[touchIdx].notNil) {
-			~kaossVoices[touchIdx].set(\gate, 0);
-			~kaossVoices.removeAt(touchIdx);
-			("Kaoss voice " ++ touchIdx ++ " released").postln;
-		};
-	};
-}, '/kaoss/touch');
+	}, "/multixy/" ++ i ++ "/z");
+};
+
+// Window size slider from TouchOSC
+OSCdef(\kaossWindow, { |msg|
+	~ccBuses.setAt(~busNames[\kaoss_window][\index], msg[1].asFloat);
+}, '/kaoss/window');
 
 // Volume control from TouchOSC fader
 OSCdef(\kaossVol, { |msg|

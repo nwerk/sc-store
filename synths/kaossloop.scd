@@ -4,14 +4,14 @@
 SynthDef(\kaossVoice, { |out=0, buf=0, padX=0.5, padY=0.5, gate=1, ccBus=0, amp=0.5|
 	var sig, env, phase, readPhase, rate;
 	var ccVals = In.kr(ccBus, 128);
-	var speed = Select.kr(~busNames[\kaoss_speed].index, ccVals);
+	var windowParam = Select.kr(~busNames[\kaoss_window].index, ccVals);
 	var vol = Select.kr(~busNames[\kaoss_vol].index, ccVals);
 	var bufFrames = BufFrames.kr(buf);
 	var center = padX * bufFrames;
-	var windowFrames = padY.linlin(0, 1, 1000, bufFrames);
+	var windowFrames = windowParam.linlin(0, 1, 1000, bufFrames);
 
-	// Expression pedal controls playback speed continuously
-	rate = speed.linlin(0, 1, 0.25, 4.0);
+	// Y axis controls playback speed per voice
+	rate = padY.linlin(0, 1, 0.25, 4.0);
 
 	// Phasor sweeps through the window at buffer rate
 	phase = Phasor.ar(0, BufRateScale.kr(buf) * rate, 0, windowFrames);
