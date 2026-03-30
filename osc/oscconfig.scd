@@ -29,8 +29,8 @@
 
 	// Z (touch state) — spawn or release voice
 	OSCdef(("kaossZ" ++ i).asSymbol, { |msg|
-		var z = msg[1];
-		if (z > 0) {
+		var z = msg[1]; 
+		if (z == true) {
 			// Touch down — spawn voice
 			if (~kaossVoices[i].isNil) {
 				~kaossVoices[i] = Synth(\kaossVoice, [
@@ -64,6 +64,5 @@ OSCdef(\kaossWindow, { |msg|
 OSCdef(\kaossVol, { |msg|
 	~ccBuses.setAt(~busNames[\kaoss_vol][\index], msg[1]);
 }, '/kaoss/vol');
-OSCFunc.trace(true);
 "OSC config for Kaoss Pad loaded!".postln;
 )
