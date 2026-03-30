@@ -10,7 +10,13 @@ SynthDef(\kaossVoice, { |out=0, buf=0, padX=0.5, padY=0.5, gate=1, ccBus=0, amp=
 	var windowFrames = windowParam.linlin(0, 1, 1000, bufFrames);
 
 	// Y axis controls playback speed per voice
-	rate = padY.linlin(0, 1, 0.25, 4.0);
+	// If quantized mode is enabled, snap to harmonic minor scale
+	var quantRates, quantIdx, quantizedRate, useQuant;
+	quantRates = [0.25, 0.297, 0.354, 0.397, 0.472, 0.53, 0.63, 0.75]; // Harmonic minor intervals mapped to rate domain
+	useQuant = (('kaossQuantizedMode'.asSymbol).envirGet ? false).asBoolean;
+	quantIdx = (padY * (quantRates.size - 1)).round.clip(0, quantRates.size - 1);
+	quantizedRate = Select.kr(quantIdx, quantRates);
+	rate = Select.kr(useQuant, [padY.linlin(0, 1, 0.25, 4.0), quantizedRate]);
 
 	// Crossfade between old and new X positions
 	// Use two lagged versions of padX for crossfade
