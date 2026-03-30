@@ -64,5 +64,21 @@ OSCdef(\kaossWindow, { |msg|
 OSCdef(\kaossVol, { |msg|
 	~ccBuses.setAt(~busNames[\kaoss_vol][\index], msg[1]);
 }, '/kaoss/vol');
+OSCFunc.trace(true);
+
+// Quantized mode toggle (harmonic minor quantization)
+// OSC: send /kaoss/quant_toggle with any value to toggle
+~kaossQuantizedMode = false; // global flag
+OSCdef(\kaossQuantToggle, { |msg|
+	~kaossQuantizedMode = ~kaossQuantizedMode.not;
+	// Update all active voices immediately
+	~kaossVoices.do { |voice|
+		if (voice.notNil) {
+			voice.set(\kaossQuantizedMode, ~kaossQuantizedMode.asInteger);
+		}
+	};
+	("Kaoss quantized mode: " ++ ~kaossQuantizedMode).postln;
+}, '/kaoss/quant_toggle');
+
 "OSC config for Kaoss Pad loaded!".postln;
 )
