@@ -30,7 +30,6 @@ s.waitForBoot {
 
 	// Phase space state tracker
 	Synth(\phaseSpaceState, [
-		\freqBus, ~freqBus,
 		\ampBus, ~ampBus,
 		\stateXBus, ~stateXBus,
 		\stateYBus, ~stateYBus

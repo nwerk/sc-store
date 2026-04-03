@@ -1,15 +1,14 @@
-// Phase-space state normalizer: maps tracker freq/amp to 2D coordinate
-SynthDef(\phaseSpaceState, { |freqBus=0, ampBus=1, stateXBus=0, stateYBus=0, freqLo=80, freqHi=2000, ampSmooth=0.1|
-	var freq, amp, stateX, stateY;
+// Phase-space state: maps fast vs slow amplitude to 2D coordinate
+SynthDef(\phaseSpaceState, { |ampBus=1, stateXBus=0, stateYBus=0|
+	var amp, stateX, stateY;
 
-	freq = In.kr(freqBus, 1);
 	amp = In.kr(ampBus, 1);
 
-	// stateX = smoothed amplitude (already 0..1 from tracker)
-	stateX = Lag.kr(amp, ampSmooth).clip(0, 1);
+	// stateX = fast amplitude (responds quickly to transients)
+	stateX = Lag.kr(amp, 0.05).clip(0, 1);
 
-	// stateY = frequency mapped to 0..1 range, clipped
-	stateY = freq.explin(freqLo, freqHi, 0, 1).clip(0, 1);
+	// stateY = slow amplitude (tracks overall dynamics envelope)
+	stateY = Lag.kr(amp, 2.0).clip(0, 1);
 
 	Out.kr(stateXBus, stateX);
 	Out.kr(stateYBus, stateY);
