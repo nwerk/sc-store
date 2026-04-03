@@ -19,6 +19,8 @@ s.waitForBoot {
 	// Audio bus for attractor voices routed into master
 	~attractorBus = Bus.audio(s, 2);
 
+	~ccBuses.setAt(~busNames[\master_vol][\index], 0.8);
+
 	// Pitch/amp tracker with transient detection
 	Synth(\tartiniTracker_sigmundStyle, [
 		\inChan, 0,
@@ -90,17 +92,6 @@ s.waitForBoot {
 			};
 		};
 	}, '/attractor/touch');
-
-	// Continuous XY updates while finger is held: /attractor/move  index  x  y
-	OSCdef(\attractorMove, { |msg, time, addr|
-		var idx = msg[1].asInteger.clip(0, 4);
-		var x = msg[2].asFloat;
-		var y = msg[3].asFloat;
-		~voiceXY[idx] = [x, y];
-		if (~voices[idx].notNil) {
-			~voices[idx].set(\freq, ~xToFreq.(x), \fingerY, y);
-		};
-	}, '/attractor/move');
 
 	// Global parameter OSC responders (from TouchOSC faders)
 	OSCdef(\attractorAttack, { |msg|

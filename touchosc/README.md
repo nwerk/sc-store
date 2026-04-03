@@ -37,8 +37,7 @@ the Multi XY pad are voices — each one sounds when the audio's state passes ne
 
 | Control        | Type    | OSC Address             | Range     | Description                                           |
 |----------------|---------|-------------------------|-----------|-------------------------------------------------------|
-| Multi XY Pad   | XY Pad  | `/attractor/touch`      | 0.0–1.0   | 5-point touch: sends [index, x, y, gate]             |
-| (finger move)  |         | `/attractor/move`       | 0.0–1.0   | Continuous update: sends [index, x, y]               |
+| Multi XY Pad   | XY Pad  | `/attractor/touch`      | 0.0–1.0   | 5-point touch: sends [index, x, y, gate] for all events |
 | Prox Radius    | Fader   | `/attractor/proxRadius` | 0.0–1.0   | How close audio state must be to activate a voice     |
 | Attack         | Fader   | `/attractor/attack`     | 0.0–1.0   | Envelope attack time (maps to 1ms–2s)                |
 | Release        | Fader   | `/attractor/release`    | 0.0–1.0   | Envelope release time (maps to 10ms–5s)              |
@@ -57,7 +56,7 @@ the Multi XY pad are voices — each one sounds when the audio's state passes ne
    - Configure OSC:
      - For each touch point i (0–4), set up a Lua script or use the built-in
        Multi XY messages. Map touch-down to send `/attractor/touch i x y 1`,
-       movement to `/attractor/move i x y`, and touch-up to `/attractor/touch i x y 0`
+       movement to `/attractor/touch i x y 1`, and touch-up to `/attractor/touch i x y 0`
 4. **Add 6 vertical faders** in the bottom 25%:
    - Each fader sends its respective OSC address listed above
    - Range: 0.0 to 1.0
@@ -88,12 +87,12 @@ function onValueChanged(key)
       local y = self.values["touch/y/" .. (idx+1)] or 0.5
       sendOSC("/attractor/touch", idx, x, y, gate)
     elseif axis == "x" or axis == "y" then
-      -- Movement: send move message if finger is down
+      -- Movement: re-send touch with gate=1 so SC updates position
       local z = self.values["touch/z/" .. (idx+1)] or 0
       if z > 0 then
         local x = self.values["touch/x/" .. (idx+1)] or 0.5
         local y = self.values["touch/y/" .. (idx+1)] or 0.5
-        sendOSC("/attractor/move", idx, x, y)
+        sendOSC("/attractor/touch", idx, x, y, 1)
       end
     end
   end
