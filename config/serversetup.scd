@@ -3,6 +3,8 @@ Platform.case(
 	\linux, {
 		"Running Linux SuperCollider script...".postln;
 		s.quit;
+		s.options.memSize = 65536;
+		s.options.maxNodes = 4096;
 		s.options.sampleRate = 48000;
 		s.options.blockSize = 64;
 		s.options.device = "JackDriver";
@@ -11,6 +13,8 @@ Platform.case(
 	\windows, {
 		"Running Windows SuperCollider script...".postln;
 		s.quit;
+		s.options.memSize = 65536;
+		s.options.maxNodes = 4096;
 		s.options.sampleRate = 48000;
 		s.options.blockSize = 8;
 		s.options.device = "Focusrite USB ASIO";
