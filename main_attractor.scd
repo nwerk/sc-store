@@ -63,8 +63,7 @@ s.waitForBoot {
 					\fingerY, y,
 					\stateXBus, ~stateXBus,
 					\stateYBus, ~stateYBus,
-					\proxRadius, 0.3,
-					\amp, 0.8
+					\amp, 0.7
 				], target: ~masterSynth, addAction: \addBefore);
 			};
 		} {
@@ -87,10 +86,6 @@ s.waitForBoot {
 	}, '/attractor/move');
 
 	// Global parameter OSC responders (from TouchOSC faders)
-	OSCdef(\attractorProxRadius, { |msg|
-		~voices.do { |v| if(v.notNil) { v.set(\proxRadius, msg[1].asFloat.linlin(0, 1, 0.05, 1.0)) } };
-	}, '/attractor/proxRadius');
-
 	OSCdef(\attractorAttack, { |msg|
 		~voices.do { |v| if(v.notNil) { v.set(\attack, msg[1].asFloat.linlin(0, 1, 0.001, 2.0)) } };
 	}, '/attractor/attack');
