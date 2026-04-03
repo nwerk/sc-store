@@ -20,7 +20,7 @@ SynthDef(\phaseSpaceState, { |ampBus=1, stateXBus=0, stateYBus=0|
 SynthDef(\attractorVoice, { |out=0, gate=0, fingerX=0.5, fingerY=0.5, stateXBus=0, stateYBus=0,
 	attack=0.05, release=1.0, amp=0.7, reverbMix=0.4, reverbRoom=0.7|
 	var stateX, stateY, env, sig;
-	var baseFreq, filtFreq, tremRate, tremDepth;
+	var baseFreq, filtFreq, shimmerRate;
 
 	stateX = In.kr(stateXBus, 1);  // fast amp: responds to transients
 	stateY = In.kr(stateYBus, 1);  // slow amp: tracks overall dynamics
@@ -30,16 +30,12 @@ SynthDef(\attractorVoice, { |out=0, gate=0, fingerX=0.5, fingerY=0.5, stateXBus=
 	// fingerY sets base pitch
 	baseFreq = fingerY.linexp(0, 1, 80, 2000);
 
-	// Six detuned harmonics with LFNoise2 shimmer
+	// Six detuned harmonics; stateX speeds up shimmer on transients
+	shimmerRate = stateX.linlin(0, 1, 0.2, 3.0);
 	sig = Mix.fill(6, { |i|
-		var detune = LFNoise2.kr(0.4 + (i * 0.31)).range(0.997, 1.003);
+		var detune = LFNoise2.kr(shimmerRate * (0.4 + (i * 0.31))).range(0.997, 1.003);
 		SinOsc.ar(baseFreq * (i + 1) * detune, 0, 0.3 / (i + 1))
 	});
-
-	// stateX (transients) drives tremolo — more attacks = faster, deeper tremolo
-	tremRate  = stateX.linlin(0, 1, 0.5, 14);
-	tremDepth = stateX.linlin(0, 1, 0.05, 0.85);
-	sig = sig * (1.0 - (tremDepth * LFSaw.kr(tremRate, 0).range(0, 1)));
 
 	// stateY (slow dynamics) opens a resonant filter — playing louder = brighter
 	filtFreq = stateY.linexp(0.001, 1, baseFreq * 1.2, baseFreq * 10).clip(120, 18000);
