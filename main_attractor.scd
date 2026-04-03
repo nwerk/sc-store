@@ -37,7 +37,23 @@ s.waitForBoot {
 
 	// Pre-allocate 5 voice slots (initially nil; created on touch)
 	~voices = Array.fill(5, { nil });
-	~quantise = 0;  // 0 = free pitch, 1 = chromatic quantise
+	~voiceXY = Array.fill(5, { [0.5, 0.5] });  // stores raw [x, y] per voice slot
+	~quantise = 0;  // 0 = free pitch, 1 = harmonic minor quantise
+
+	// Map raw x (0.0–1.0) to frequency, with optional C harmonic minor snap
+	~xToFreq = { |x|
+		var rawFreq = x.linexp(0, 1, 80, 2000);
+		if (~quantise == 1) {
+			var scale = [0, 2, 3, 5, 7, 8, 11];  // C harmonic minor semitone offsets
+			var midi = rawFreq.cpsmidi;
+			var octaveBase = midi.floor - (midi.floor % 12);
+			var pc = midi % 12;
+			var nearest = scale.minIndex({ |s| (pc - s).abs.min(12 - (pc - s).abs) });
+			(octaveBase + scale[nearest]).midicps
+		} {
+			rawFreq
+		}
+	};
 
 	// Master output (addToTail ensures it reads from attractorBus after voices write)
 	~masterSynth = Synth(\master, [\inBus, ~attractorBus, \ccBus, ~ccBuses], addAction: \addToTail);
@@ -52,18 +68,18 @@ s.waitForBoot {
 		var gate = msg[4].asInteger;
 
 		if (gate == 1) {
+			~voiceXY[idx] = [x, y];
 			if (~voices[idx].notNil) {
 				// Voice already exists — just update position (handles repeated gate=1 from TouchOSC)
-				~voices[idx].set(\fingerX, x, \fingerY, y);
+				~voices[idx].set(\freq, ~xToFreq.(x), \fingerY, y);
 			} {
 				// New touch — create a voice
 				~voices[idx] = Synth(\attractorVoice, [
 					\out, ~attractorBus,
 					\gate, 1,
-					\fingerX, x,
+					\freq, ~xToFreq.(x),
 					\fingerY, y,
-					\amp, 0.7,
-					\quantise, ~quantise
+					\amp, 0.5
 				], target: ~masterSynth, addAction: \addBefore);
 			};
 		} {
@@ -80,8 +96,9 @@ s.waitForBoot {
 		var idx = msg[1].asInteger.clip(0, 4);
 		var x = msg[2].asFloat;
 		var y = msg[3].asFloat;
+		~voiceXY[idx] = [x, y];
 		if (~voices[idx].notNil) {
-			~voices[idx].set(\fingerX, x, \fingerY, y);
+			~voices[idx].set(\freq, ~xToFreq.(x), \fingerY, y);
 		};
 	}, '/attractor/move');
 
@@ -104,7 +121,9 @@ s.waitForBoot {
 
 	OSCdef(\attractorQuantise, { |msg|
 		~quantise = msg[1].asInteger.clip(0, 1);
-		~voices.do { |v| if(v.notNil) { v.set(\quantise, ~quantise) } };
+		~voices.doWithIndex { |v, i|
+			if (v.notNil) { v.set(\freq, ~xToFreq.(~voiceXY[i][0])) }
+		};
 	}, '/attractor/quantise');
 
 	"Phase-Space Attractor patch loaded!".postln;
