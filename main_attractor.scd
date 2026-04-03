@@ -52,24 +52,27 @@ s.waitForBoot {
 		var gate = msg[4].asInteger;
 
 		if (gate == 1) {
-			// Free any existing voice at this index before creating a new one
 			if (~voices[idx].notNil) {
-				~voices[idx].set(\gate, 0);
+				// Voice already exists — just update position (handles repeated gate=1 from TouchOSC)
+				~voices[idx].set(\fingerX, x, \fingerY, y);
+			} {
+				// New touch — create a voice
+				~voices[idx] = Synth(\attractorVoice, [
+					\out, ~attractorBus,
+					\gate, 1,
+					\fingerX, x,
+					\fingerY, y,
+					\stateXBus, ~stateXBus,
+					\stateYBus, ~stateYBus,
+					\proxRadius, 0.3,
+					\amp, 0.8
+				], target: ~masterSynth, addAction: \addBefore);
 			};
-			~voices[idx] = Synth(\attractorVoice, [
-				\out, ~attractorBus,
-				\gate, 1,
-				\fingerX, x,
-				\fingerY, y,
-				\stateXBus, ~stateXBus,
-				\stateYBus, ~stateYBus,
-				\proxRadius, 0.3,
-				\amp, 0.8
-			], target: ~masterSynth, addAction: \addBefore);
 		} {
 			// Release the voice envelope
 			if (~voices[idx].notNil) {
 				~voices[idx].set(\gate, 0);
+				~voices[idx] = nil;
 			};
 		};
 	}, '/attractor/touch');
