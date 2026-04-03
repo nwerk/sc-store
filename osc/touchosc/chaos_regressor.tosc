@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TouchOSC layout: chaos_regressor.tosc
+  Open this file in TouchOSC Editor (https://hexler.net/touchosc)
+  or import directly into the TouchOSC app.
+
+  Page 1 "XY + Params":
+    - XY Pad  -> /chaos/xy  (x, y floats 0-1)
+    - 10 vertical faders -> /chaos/param/1 .. /chaos/param/10 (0-1)
+      These also receive feedback from SC when the MLP predicts.
+
+  Page 2 "Training":
+    - Add Point   (momentary) -> /chaos/addpoint
+    - Train       (momentary) -> /chaos/train
+    - Clear Data  (momentary) -> /chaos/cleardata
+    - Save Data   (momentary) -> /chaos/savedata
+    - Load Data   (momentary) -> /chaos/loaddata
+    - Save MLP    (momentary) -> /chaos/savemlp
+    - Load MLP    (momentary) -> /chaos/loadmlp
+    - Predict     (toggle)    -> /chaos/predict
+    - Point Count (label, receives /chaos/pointcount)
+    - Train Loss  (label, receives /chaos/trainloss)
+    - Status      (label, receives /chaos/status)
+-->
+<leOS version="1.0.0">
+  <root>
+    <node type="DOCUMENT">
+      <property name="version" type="s">1.0.0</property>
+      <children>
+
+        <!-- ==================== PAGE 1: XY + Params ==================== -->
+        <node type="PAGE">
+          <property name="name" type="s">XY + Params</property>
+          <children>
+
+            <!-- XY Pad -->
+            <node type="CONTROLXY">
+              <property name="name" type="s">xy</property>
+              <property name="tag" type="s">/chaos/xy</property>
+              <property name="frame" type="r">0.02 0.05 0.52 0.90</property>
+              <property name="color" type="c">0.2 0.6 1.0 1.0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 1 -->
+            <node type="FADER">
+              <property name="name" type="s">P1</property>
+              <property name="tag" type="s">/chaos/param/1</property>
+              <property name="frame" type="r">0.56 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 2 -->
+            <node type="FADER">
+              <property name="name" type="s">P2</property>
+              <property name="tag" type="s">/chaos/param/2</property>
+              <property name="frame" type="r">0.61 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 3 -->
+            <node type="FADER">
+              <property name="name" type="s">P3</property>
+              <property name="tag" type="s">/chaos/param/3</property>
+              <property name="frame" type="r">0.66 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 4 -->
+            <node type="FADER">
+              <property name="name" type="s">P4</property>
+              <property name="tag" type="s">/chaos/param/4</property>
+              <property name="frame" type="r">0.71 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 5 -->
+            <node type="FADER">
+              <property name="name" type="s">P5</property>
+              <property name="tag" type="s">/chaos/param/5</property>
+              <property name="frame" type="r">0.76 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 6 -->
+            <node type="FADER">
+              <property name="name" type="s">P6</property>
+              <property name="tag" type="s">/chaos/param/6</property>
+              <property name="frame" type="r">0.81 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 7 -->
+            <node type="FADER">
+              <property name="name" type="s">P7</property>
+              <property name="tag" type="s">/chaos/param/7</property>
+              <property name="frame" type="r">0.86 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 8 -->
+            <node type="FADER">
+              <property name="name" type="s">P8</property>
+              <property name="tag" type="s">/chaos/param/8</property>
+              <property name="frame" type="r">0.91 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 9 -->
+            <node type="FADER">
+              <property name="name" type="s">P9</property>
+              <property name="tag" type="s">/chaos/param/9</property>
+              <property name="frame" type="r">0.56 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Param Fader 10 -->
+            <node type="FADER">
+              <property name="name" type="s">P10</property>
+              <property name="tag" type="s">/chaos/param/10</property>
+              <property name="frame" type="r">0.96 0.05 0.04 0.85</property>
+              <property name="color" type="c">0.9 0.4 0.1 1.0</property>
+              <property name="orientation" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+          </children>
+        </node>
+
+        <!-- ==================== PAGE 2: Training ==================== -->
+        <node type="PAGE">
+          <property name="name" type="s">Training</property>
+          <children>
+
+            <!-- Add Point -->
+            <node type="BUTTON">
+              <property name="name" type="s">Add Point</property>
+              <property name="tag" type="s">/chaos/addpoint</property>
+              <property name="frame" type="r">0.02 0.04 0.46 0.12</property>
+              <property name="color" type="c">0.1 0.8 0.3 1.0</property>
+              <property name="buttonType" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Train -->
+            <node type="BUTTON">
+              <property name="name" type="s">Train</property>
+              <property name="tag" type="s">/chaos/train</property>
+              <property name="frame" type="r">0.52 0.04 0.46 0.12</property>
+              <property name="color" type="c">0.1 0.4 0.9 1.0</property>
+              <property name="buttonType" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Predict Toggle -->
+            <node type="BUTTON">
+              <property name="name" type="s">Predict</property>
+              <property name="tag" type="s">/chaos/predict</property>
+              <property name="frame" type="r">0.02 0.19 0.96 0.12</property>
+              <property name="color" type="c">0.9 0.6 0.1 1.0</property>
+              <property name="buttonType" type="i">1</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Clear Data -->
+            <node type="BUTTON">
+              <property name="name" type="s">Clear Data</property>
+              <property name="tag" type="s">/chaos/cleardata</property>
+              <property name="frame" type="r">0.02 0.34 0.30 0.10</property>
+              <property name="color" type="c">0.8 0.1 0.1 1.0</property>
+              <property name="buttonType" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Save Data -->
+            <node type="BUTTON">
+              <property name="name" type="s">Save Data</property>
+              <property name="tag" type="s">/chaos/savedata</property>
+              <property name="frame" type="r">0.35 0.34 0.30 0.10</property>
+              <property name="color" type="c">0.5 0.5 0.5 1.0</property>
+              <property name="buttonType" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Load Data -->
+            <node type="BUTTON">
+              <property name="name" type="s">Load Data</property>
+              <property name="tag" type="s">/chaos/loaddata</property>
+              <property name="frame" type="r">0.68 0.34 0.30 0.10</property>
+              <property name="color" type="c">0.5 0.5 0.5 1.0</property>
+              <property name="buttonType" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Save MLP -->
+            <node type="BUTTON">
+              <property name="name" type="s">Save MLP</property>
+              <property name="tag" type="s">/chaos/savemlp</property>
+              <property name="frame" type="r">0.02 0.47 0.46 0.10</property>
+              <property name="color" type="c">0.3 0.3 0.8 1.0</property>
+              <property name="buttonType" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Load MLP -->
+            <node type="BUTTON">
+              <property name="name" type="s">Load MLP</property>
+              <property name="tag" type="s">/chaos/loadmlp</property>
+              <property name="frame" type="r">0.52 0.47 0.46 0.10</property>
+              <property name="color" type="c">0.3 0.3 0.8 1.0</property>
+              <property name="buttonType" type="i">0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Point Counter Label -->
+            <node type="LABEL">
+              <property name="name" type="s">Points</property>
+              <property name="tag" type="s">/chaos/pointcount</property>
+              <property name="frame" type="r">0.02 0.60 0.30 0.08</property>
+              <property name="color" type="c">0.8 0.8 0.8 1.0</property>
+              <property name="text" type="s">Points: 0</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Train Loss Label -->
+            <node type="LABEL">
+              <property name="name" type="s">Loss</property>
+              <property name="tag" type="s">/chaos/trainloss</property>
+              <property name="frame" type="r">0.35 0.60 0.30 0.08</property>
+              <property name="color" type="c">0.8 0.8 0.8 1.0</property>
+              <property name="text" type="s">Loss: -</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+            <!-- Status Label -->
+            <node type="LABEL">
+              <property name="name" type="s">Status</property>
+              <property name="tag" type="s">/chaos/status</property>
+              <property name="frame" type="r">0.02 0.71 0.96 0.08</property>
+              <property name="color" type="c">0.6 0.9 0.6 1.0</property>
+              <property name="text" type="s">Ready</property>
+              <property name="z" type="i">1</property>
+              <children/>
+            </node>
+
+          </children>
+        </node>
+
+      </children>
+    </node>
+  </root>
+</leOS>
