@@ -52,7 +52,10 @@ s.waitForBoot {
 		var gate = msg[4].asInteger;
 
 		if (gate == 1) {
-			// Create a new voice (doneAction:2 frees previous on release)
+			// Free any existing voice at this index before creating a new one
+			if (~voices[idx].notNil) {
+				~voices[idx].set(\gate, 0);
+			};
 			~voices[idx] = Synth(\attractorVoice, [
 				\out, ~attractorBus,
 				\gate, 1,
