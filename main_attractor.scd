@@ -37,6 +37,7 @@ s.waitForBoot {
 
 	// Pre-allocate 5 voice slots (initially nil; created on touch)
 	~voices = Array.fill(5, { nil });
+	~quantise = 0;  // 0 = free pitch, 1 = chromatic quantise
 
 	// Master output (addToTail ensures it reads from attractorBus after voices write)
 	~masterSynth = Synth(\master, [\inBus, ~attractorBus, \ccBus, ~ccBuses], addAction: \addToTail);
@@ -61,9 +62,8 @@ s.waitForBoot {
 					\gate, 1,
 					\fingerX, x,
 					\fingerY, y,
-					\stateXBus, ~stateXBus,
-					\stateYBus, ~stateYBus,
-					\amp, 0.7
+					\amp, 0.7,
+					\quantise, ~quantise
 				], target: ~masterSynth, addAction: \addBefore);
 			};
 		} {
@@ -101,6 +101,11 @@ s.waitForBoot {
 	OSCdef(\attractorRoom, { |msg|
 		~voices.do { |v| if(v.notNil) { v.set(\reverbRoom, msg[1].asFloat) } };
 	}, '/attractor/room');
+
+	OSCdef(\attractorQuantise, { |msg|
+		~quantise = msg[1].asInteger.clip(0, 1);
+		~voices.do { |v| if(v.notNil) { v.set(\quantise, ~quantise) } };
+	}, '/attractor/quantise');
 
 	"Phase-Space Attractor patch loaded!".postln;
 };

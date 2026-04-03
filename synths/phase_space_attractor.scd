@@ -16,35 +16,30 @@ SynthDef(\phaseSpaceState, { |ampBus=1, stateXBus=0, stateYBus=0|
 
 "SynthDef \\phaseSpaceState added.".postln;
 
-// Polyphonic voice gated by touch, timbre modulated by audio phase-space state
-SynthDef(\attractorVoice, { |out=0, gate=0, fingerX=0.5, fingerY=0.5, stateXBus=0, stateYBus=0,
-	attack=0.05, release=1.0, amp=0.7, reverbMix=0.4, reverbRoom=0.7|
-	var stateX, stateY, env, sig;
-	var baseFreq, filtFreq, shimmerRate;
-
-	stateX = In.kr(stateXBus, 1);  // fast amp: responds to transients
-	stateY = In.kr(stateYBus, 1);  // slow amp: tracks overall dynamics
+SynthDef(\attractorVoice, { |out=0, gate=0, fingerX=0.5, fingerY=0.5,
+	attack=0.05, release=1.0, amp=0.7, reverbMix=0.4, reverbRoom=0.7,
+	quantise=0|
+	var env, sig, baseFreq;
 
 	env = EnvGen.kr(Env.asr(attack, 1.0, release), gate, doneAction: 2);
 
-	// fingerY sets base pitch
-	baseFreq = fingerY.linexp(0, 1, 80, 2000);
+	// fingerX sets base pitch, fingerY sets stereo pan
+	baseFreq = fingerX.linexp(0, 1, 80, 2000);
 
-	// Six detuned harmonics; stateX speeds up shimmer on transients
-	shimmerRate = stateX.linlin(0, 1, 0.2, 3.0);
+	// Chromatic quantise: snap to nearest semitone when quantise=1
+	baseFreq = Select.kr(quantise, [baseFreq, baseFreq.cpsmidi.round(1).midicps]);
+
+	// Six harmonics with gentle static detune
 	sig = Mix.fill(6, { |i|
-		var detune = LFNoise2.kr(shimmerRate * (0.4 + (i * 0.31))).range(0.997, 1.003);
-		SinOsc.ar(baseFreq * (i + 1) * detune, 0, 0.3 / (i + 1))
+		var detune = LFNoise2.kr(0.3 + (i * 0.17)).range(0.998, 1.002);
+		SinOsc.ar(baseFreq * (i + 1) * detune, 0, 0.28 / (i + 1))
 	});
 
-	// stateY (slow dynamics) opens a resonant filter — playing louder = brighter
-	filtFreq = stateY.linexp(0.001, 1, baseFreq * 1.2, baseFreq * 10).clip(120, 18000);
-	sig = RLPF.ar(sig, filtFreq, 0.4);
-
+	sig = LPF.ar(sig, (baseFreq * 6).clip(200, 18000));
 	sig = LeakDC.ar(sig);
 	sig = sig * env * amp;
 	sig = FreeVerb.ar(sig, reverbMix, reverbRoom, 0.5);
-	sig = Pan2.ar(sig, fingerX.linlin(0, 1, -1, 1));
+	sig = Pan2.ar(sig, fingerY.linlin(0, 1, -1, 1));
 
 	Out.ar(out, sig);
 }).add;
