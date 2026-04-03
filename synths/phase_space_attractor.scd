@@ -16,43 +16,38 @@ SynthDef(\phaseSpaceState, { |ampBus=1, stateXBus=0, stateYBus=0|
 
 "SynthDef \\phaseSpaceState added.".postln;
 
-// Polyphonic voice gated by touch, amplitude modulated by proximity to audio state
+// Polyphonic voice gated by touch, timbre modulated by audio phase-space state
 SynthDef(\attractorVoice, { |out=0, gate=0, fingerX=0.5, fingerY=0.5, stateXBus=0, stateYBus=0,
-	proxRadius=0.3, attack=0.01, release=0.5, amp=0.8, reverbMix=0.3, reverbRoom=0.6|
-	var stateX, stateY, distance, proxAmplitude, env;
-	var baseFreq, source, noise, sig;
+	attack=0.05, release=1.0, amp=0.7, reverbMix=0.4, reverbRoom=0.7|
+	var stateX, stateY, env, sig;
+	var baseFreq, filtFreq, tremRate, tremDepth;
 
-	stateX = In.kr(stateXBus, 1);
-	stateY = In.kr(stateYBus, 1);
+	stateX = In.kr(stateXBus, 1);  // fast amp: responds to transients
+	stateY = In.kr(stateYBus, 1);  // slow amp: tracks overall dynamics
 
-	// Proximity: Euclidean distance in phase space
-	distance = hypot(fingerX - stateX, fingerY - stateY);
-	proxAmplitude = (1.0 - (distance / proxRadius)).clip(0, 1);
-
-	// Gate envelope with release tail
 	env = EnvGen.kr(Env.asr(attack, 1.0, release), gate, doneAction: 2);
 
-	// Sound source: detuned sine harmonics, richness controlled by fingerX
-	baseFreq = fingerY.linexp(0, 1, 100, 3000);
-	source = Mix.fill(4, { |i|
-		SinOsc.ar(
-			baseFreq * (i + 1) * LFNoise1.kr(0.3).range(0.998, 1.002),
-			0,
-			fingerX.linlin(0, 1, 0.05, 0.25) / (i + 1)
-		);
+	// fingerY sets base pitch
+	baseFreq = fingerY.linexp(0, 1, 80, 2000);
+
+	// Six detuned harmonics with LFNoise2 shimmer
+	sig = Mix.fill(6, { |i|
+		var detune = LFNoise2.kr(0.4 + (i * 0.31)).range(0.997, 1.003);
+		SinOsc.ar(baseFreq * (i + 1) * detune, 0, 0.3 / (i + 1))
 	});
 
-	// Gentle filtered noise layer
-	noise = LPF.ar(WhiteNoise.ar(0.02 * fingerX), baseFreq * 3);
-	source = source + noise;
+	// stateX (transients) drives tremolo — more attacks = faster, deeper tremolo
+	tremRate  = stateX.linlin(0, 1, 0.5, 14);
+	tremDepth = stateX.linlin(0, 1, 0.05, 0.85);
+	sig = sig * (1.0 - (tremDepth * LFSaw.kr(tremRate, 0).range(0, 1)));
 
-	// Final signal: source * envelope * proximity * amplitude
-	sig = source * env * proxAmplitude * amp;
+	// stateY (slow dynamics) opens a resonant filter — playing louder = brighter
+	filtFreq = stateY.linexp(0.001, 1, baseFreq * 1.2, baseFreq * 10).clip(120, 18000);
+	sig = RLPF.ar(sig, filtFreq, 0.4);
 
-	// Reverb
-	sig = FreeVerb.ar(sig, reverbMix, reverbRoom, 0.4);
-
-	// Stereo pan based on fingerX
+	sig = LeakDC.ar(sig);
+	sig = sig * env * amp;
+	sig = FreeVerb.ar(sig, reverbMix, reverbRoom, 0.5);
 	sig = Pan2.ar(sig, fingerX.linlin(0, 1, -1, 1));
 
 	Out.ar(out, sig);
