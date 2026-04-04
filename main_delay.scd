@@ -53,7 +53,7 @@ s.waitForBoot {
 	}, '/delay/feedback');
 
 	// Delay time — exponential mapping for musical pitch control
-	// Bottom = long delay / low pitch (1s), top = short delay / high pitch (1ms)
+	// 0 = long delay / low pitch (1s), 1 = short delay / high pitch (1ms)
 	OSCdef(\delayTime, { |msg|
 		~delaySynth.set(\delayTime, msg[1].asFloat.linexp(0, 1, 1.0, 0.001));
 	}, '/delay/time');
