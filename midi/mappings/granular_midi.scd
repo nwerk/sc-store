@@ -14,17 +14,17 @@
     param13:  ( index:13 ),
     param14:  ( index:14 ),
     param15:  ( index:15 ),
-    param16:  ( index:16 ),
-    density:  ( index:17 ), // knob ch5 (bank 2)
-    param18:  ( index:18 ),
+    bufferLen:( index:16 ), // CC 16: Buffer Length (PD: ÷127 × 8000 ms)
+    density:  ( index:17 ), // CC 17: Playhead Speed / Density (PD: ÷127 × 800 ms interval)
+    randomOctave: ( index:18 ), // CC 18: Random Octave (PD: ÷127 × 4, int)
     param19:  ( index:19 ), // fader ch1
-    param20:  ( index:20 ),
-    dur:  ( index:21 ), // knob ch6 (bank 2)
-    param22:  ( index:22 ),
+    rate:     ( index:20 ), // CC 20: Grain Pitch (PD: ÷127 × 3 + 0.0625)
+    baseDur:  ( index:21 ), // CC 21: Grain Duration (PD: ÷127 × 1000 ms)
+    jitter:   ( index:22 ), // CC 22: Jitter (PD: ÷127 × 3000 samples)
     param23:  ( index:23 ), // fader ch2
-    param24:  ( index:24 ),
-    param25:  ( index:25 ), // knob ch7 (bank 2)
-    param26:  ( index:26 ),
+    playheadRand: ( index:24 ), // CC 24: Playhead Randomize (PD: ÷127 × 300)
+    playGroups:   ( index:25 ), // CC 25: Play Groups (PD: ÷127 × 50)
+    randDetune:   ( index:26 ), // CC 26: Rand Detune (PD: ÷127 × 100)
     param27:  ( index:27 ), // fader ch3
     param28:  ( index:28 ),
     param29:  ( index:29 ), // knob ch8 (bank 2)
@@ -44,23 +44,23 @@
     param43:  ( index:43 ), // fader ch7
     param44:  ( index:44 ),
     param45:  ( index:45 ),
-    param46:  ( index:46 ),
+    feedback: ( index:46 ), // CC 46: Feedback (PD: raw 0–1)
     param47:  ( index:47 ), // fader ch8
     param48:  ( index:48 ),
     param49:  ( index:49 ),
-    param50:  ( index:50 ),
+    octaveGroups: ( index:50 ), // CC 50: Octave Groups (PD: ÷127 × 50)
     param51:  ( index:51 ),
     param52:  ( index:52 ),
     param53:  ( index:53 ),
-    param54:  ( index:54 ),
-    param55:  ( index:55 ),
+    bitDepth: ( index:54 ), // CC 54: Bit Depth (PD: val + 0.05)
+    playbackSpeed: ( index:55 ), // CC 55: Playback Speed (PD: ÷127 × 3 + 0.0625)
     param56:  ( index:56 ),
     param57:  ( index:57 ),
-    param58:  ( index:58 ),
-    param59:  ( index:59 ),
-    param60:  ( index:60 ),
+    freqModAmt:  ( index:58 ), // CC 58: Freq Mod Amount (PD: ÷127 × 50)
+    freqModFreq: ( index:59 ), // CC 59: Freq Mod Freq (PD: ÷127 × 5 Hz)
+    panRand:  ( index:60 ), // CC 60: Panning Amount (PD: 0–1)
     param61:  ( index:61 ),
-    param62:  ( index:62 ),
+    masterVol:( index:62 ), // CC 62: Master Volume (PD: 0–1)
     param63:  ( index:63 ),
     param64:  ( index:64 ),
     param65:  ( index:65 ),
@@ -78,7 +78,7 @@
     param77:  ( index:77 ),
     param78:  ( index:78 ),
     param79:  ( index:79 ),
-    master_vol:  ( index:80, isLatch:true ), // Boss FS-1-WH footswitch 1
+    master_vol:  ( index:80, isLatch:true ), // CC 80: Live Mode Select / Master Mute (PD: sel 3, latch)
     param81:  ( index:81 ), // Boss FS-1-WH footswitch 2
     param82:  ( index:82 ), // Boss FS-1-WH footswitch 3
     param83:  ( index:83 ), // Boss FS-1-WH footswitch 4
