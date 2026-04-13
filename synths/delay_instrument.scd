@@ -10,6 +10,7 @@ SynthDef(\delayInstrument, { |out=0, inChan=0,
 	var dtL, dtR, detuneAmt;
 	var delayPitch, bpfFreq;
 	var drive, sig;
+	var highFreqAmp, dynCutoff;
 
 	// Mono input from line-in
 	input = SoundIn.ar(inChan) * inputGain;
@@ -48,6 +49,12 @@ SynthDef(\delayInstrument, { |out=0, inChan=0,
 
 	// Safety limiter + DC removal
 	sig = LeakDC.ar(sig);
+
+	// Dynamic LPF — closes when high-frequency energy is strong
+	highFreqAmp = Amplitude.kr(HPF.ar(sig.sum, 3000), 0.01, 0.1);
+	dynCutoff = LinLin.kr(highFreqAmp, 0, 0.5, 20000, 2000).clip(2000, 20000);
+	sig = LPF.ar(sig, Lag.kr(dynCutoff, 0.05));
+
 	sig = Limiter.ar(sig, 0.95, 0.01);
 
 	Out.ar(out, sig);
