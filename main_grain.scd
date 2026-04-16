@@ -3,7 +3,9 @@ Server.killAll;
 //////// IMPORTS ///////////////////
 ~basePath = PathName(thisProcess.nowExecutingPath).pathOnly;
 thisProcess.interpreter.executeFile(~basePath ++ "config/serversetup.scd");
-thisProcess.interpreter.executeFile(~basePath ++ "midi/mappings/granular_midi.scd");
+// OSC mappings define ~busNames (same CC indices) + ~oscMap
+thisProcess.interpreter.executeFile(~basePath ++ "osc/osc_mappings.scd");
+// MIDI kept for Boss FS-1-WL foot controller
 thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/granular.scd");
 
@@ -171,91 +173,18 @@ s.waitForBoot{
 		};
 	}).play(AppClock);
 
-	// ---- MIDI Note handlers (PD note triggers) ----
+	// ---- OSC control layer (TouchOSC faders, toggles, momentaries, presets) ----
+	thisProcess.interpreter.executeFile(~basePath ++ "osc/oscconfig.scd");
+	thisProcess.interpreter.executeFile(~basePath ++ "osc/presets.scd");
 
-	// Note 1: Record trigger (toggle)
-	MIDIdef.noteOn(\recTrigger, { |vel, note|
-		~recState = ~recState.not;
-		~rec.set(\recGate, ~recState.asInteger);
-		("Record: " ++ if(~recState, "ON", "OFF")).postln;
-	}, 1);
+	// ---- Send full state to TouchOSC on boot ----
+	// (short delay so synths are fully ready)
+	AppClock.sched(0.5, {
+		~sendAllState.();
+		nil; // don't reschedule
+	});
 
-	// Note 4: Delete buffer
-	MIDIdef.noteOn(\deleteBuffer, { |vel, note|
-		~deleteBuffer.();
-	}, 4);
-
-	// Note 5: Live mode toggle
-	MIDIdef.noteOn(\liveToggle, { |vel, note|
-		if (~liveMode) {
-			~stopLiveMode.();
-		} {
-			~startLiveMode.();
-		};
-	}, 5);
-
-	// Note 9: Reverse grain toggle
-	MIDIdef.noteOn(\reverseGrain, { |vel, note|
-		~reverseState = ~reverseState.not;
-		~g.set(\reverseGrain, ~reverseState.asInteger);
-		("Reverse grain: " ++ if(~reverseState, "ON", "OFF")).postln;
-	}, 9);
-
-	// Note 10: Grain pitch reset → rate = 1.0
-	MIDIdef.noteOn(\pitchReset, { |vel, note|
-		~currentRate = 1.0;
-		~g.set(\rate, 1.0);
-		"Grain pitch reset to 1.0".postln;
-	}, 10);
-
-	// Note 12: Fixed position toggle
-	MIDIdef.noteOn(\fixedPosToggle, { |vel, note|
-		~fixedPosState = ~fixedPosState.not;
-		~g.set(\fixedPos, ~fixedPosState.asInteger);
-		("Fixed position: " ++ if(~fixedPosState, "ON", "OFF")).postln;
-	}, 12);
-
-	// Note 13: Octave down (rate × 0.5)
-	MIDIdef.noteOn(\octaveDown, { |vel, note|
-		~currentRate = ~currentRate * 0.5;
-		~g.set(\rate, ~currentRate);
-		("Octave down → rate: " ++ ~currentRate).postln;
-	}, 13);
-
-	// Note 15: Mute toggle
-	MIDIdef.noteOn(\muteToggle, { |vel, note|
-		~muteState = ~muteState.not;
-		if (~muteState) {
-			~g.set(\amp, 0);
-			"MUTED".postln;
-		} {
-			~g.set(\amp, ~prevAmp);
-			"UNMUTED".postln;
-		};
-	}, 15);
-
-	// Note 16: Octave up (rate × 2)
-	MIDIdef.noteOn(\octaveUp, { |vel, note|
-		~currentRate = ~currentRate * 2.0;
-		~g.set(\rate, ~currentRate);
-		("Octave up → rate: " ++ ~currentRate).postln;
-	}, 16);
-
-	// Note 22: Load sample (file dialog)
-	MIDIdef.noteOn(\loadSample, { |vel, note|
-		{ ~loadBuffer.(nil); }.defer; // Dialog must run on AppClock
-	}, 22);
-
-	// Note 25: Stop audio
-	MIDIdef.noteOn(\stopAudio, { |vel, note|
-		"Stopping all audio...".postln;
-		~speedUpdater.stop;
-		~fbUpdater.stop;
-		~bufLenUpdater.stop;
-		s.freeAll;
-	}, 25);
-
-	"Synth \\gran created with PD-ported features!".postln;
+	"Synth \\gran created with TouchOSC + OSC control!".postln;
 	s.meter;
 };
 )

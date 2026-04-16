@@ -35,8 +35,10 @@
 };
 
 
-~connect_midi_devices.("MIDI Mix", "MIDI Mix MIDI 1"); // test it now
-~connect_midi_devices.("FS-1-WL USB-MIDI", "FS-1-WL USB-MIDI MIDI 1"); // test it now
+~connect_midi_devices.("FS-1-WL USB-MIDI", "FS-1-WL USB-MIDI MIDI 1");
+// MIDI Mix removed — now controlled via TouchOSC over OSC.
+// Uncomment the line below to re-enable MIDI Mix if needed:
+// ~connect_midi_devices.("MIDI Mix", "MIDI Mix MIDI 1");
 
 MIDIdef.trace(true);
 MIDIdef.cc(

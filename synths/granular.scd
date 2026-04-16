@@ -169,7 +169,7 @@ SynthDef.new(\gran, {
 	isSlow = absRate < 1;
 	delayFast = userDelay.max(safeDelayMin);
 	delaySlow = safeDelayMin;
-	totalDelay = Select.ar(isSlow, [delayFast, delaySlow]);
+	totalDelay = Select.ar(K2A.ar(isSlow), [delayFast, K2A.ar(delaySlow)]);
 
 	ptr = In.ar(ptrBus, 1);
 	ptr = (ptr - totalDelay) / bufFrames;
@@ -181,7 +181,7 @@ SynthDef.new(\gran, {
 
 	// ---- Envelope and trigger ----
 	env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);
-	densCtrl = Select.ar(sync, [Dust.ar(dens), Impulse.ar(dens)]);
+	densCtrl = Select.ar(K2A.ar(sync), [Dust.ar(dens), Impulse.ar(dens)]);
 
 	// ---- Play groups: thin triggers (PD: counter-based, every Nth grain fires) ----
 	densCtrl = PulseDivider.ar(densCtrl, playGroups);
@@ -236,7 +236,7 @@ SynthDef.new(\gran, {
 	bitStepSize = 1 / ((2.pow((bitDepth * 14 + 2).round)) - 1);
 	bitCrushed = (sig / bitStepSize).round * bitStepSize * bitVol;
 	// Crossfade: when bitDepth >= 1.0 use clean signal, otherwise crushed
-	sig = Select.ar(bitDepth >= 1.0, [bitCrushed, sig]);
+	sig = Select.ar(K2A.ar(bitDepth >= 1.0), [bitCrushed, sig]);
 
 	// ---- Filter (independent from bitDepth) ----
 	sig = LPF.ar(sig, freq: filterFreq);
