@@ -275,7 +275,7 @@ SynthDef.new(\gran, {
 	// If the grain's d-range spans the entire buffer, no position is
 	// fully safe.  Fall back to half-buffer offset from the record head.
 	dSpan = (durSamp * relSpeed).abs;
-	spanExceedsBuffer = (dSpan + (2 * safeMarginSamples)) >= bufFrames;
+	spanExceedsBuffer = (dSpan + (2 * safeMarginSamples)) > bufFrames;
 	fallbackCenter = (ptr - (bufFrames * 0.5)).wrap(0, bufFrames);
 
 	// Chain: candidate → snap if unsafe → fallback if span exceeds buffer
