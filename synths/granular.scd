@@ -100,10 +100,15 @@ SynthDef.new(\gran, {
 	var ccVals, sig, env, densCtrl, durCtrl, rateCtrl, panCtrl,
 	ptr, ptrRand, posSec,
 	// helpers
-	bufFrames, absRate, safeMarginSamples, userDelay,
-	halfSpanSamples, totalDelay, delaySlow, delayFast, isSlow, safeDelayMin,
+	bufFrames, safeMarginSamples,
 	octaveMultiplier, detuneOffset, freqMod, bitStepSize, bitCrushed,
-	octaveGate;
+	octaveGate,
+	// trajectory-based playhead safety
+	ptrSpeed, recSpeedSamp, durSamp, grainRate, desiredDelay,
+	candidateCenter, d0, relSpeed, dEnd, dMin, dMax,
+	aCheck, bCheck, kLow, kHigh, isUnsafe,
+	kPrimary, snapFwd, snapBwd, snapDelta, safeCenter,
+	dSpan, spanExceedsBuffer, fallbackCenter;
 
 	// ---- CC bus reads (PD CC mapping) ----
 	ccVals = In.kr(ccBus, 128);
@@ -125,8 +130,9 @@ SynthDef.new(\gran, {
 	ptrRandSamples = Select.kr(~busNames[\jitter].index, ccVals) * 3000;
 
 	// CC 55: playback speed — PD: ÷127 × 3 + 0.0625
-	// (read here for use in playhead position calculation)
-	// This is actually applied to \ptr via main_grain.scd, but we read it for safety calc
+	// Also applied to \ptr via main_grain.scd; read here for trajectory safety calc
+	ptrSpeed = Select.kr(~busNames[\playbackSpeed].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
+
 	// CC 24: playhead randomize — PD: ÷127 × 300
 	ptrSampleDelay = Select.kr(~busNames[\playheadRand].index, ccVals) * 300 + minPtrDelay;
 
@@ -153,31 +159,6 @@ SynthDef.new(\gran, {
 
 	// CC 50: octave groups — PD: ÷127 × 50 (int, min 1)
 	octaveGroups = (Select.kr(~busNames[\octaveGroups].index, ccVals) * 50).max(1).round;
-
-	// ---- Local helper: playhead position in seconds ----
-	// (identical logic to original, rewritten inline for clarity)
-	bufFrames = BufFrames.ir(buf);
-	absRate = rate.abs.max(0.001);
-	safeMarginSamples = safeMargin * SampleRate.ir;
-
-	ptrRand = LFNoise1.ar(100).bipolar(ptrRandSamples);
-	userDelay = (ptrSampleDelay - ptrRand).max(minPtrDelay);
-
-	halfSpanSamples = 0.5 * baseDur * absRate * SampleRate.ir;
-	safeDelayMin = halfSpanSamples + safeMarginSamples;
-
-	isSlow = absRate < 1;
-	delayFast = userDelay.max(safeDelayMin);
-	delaySlow = safeDelayMin;
-	totalDelay = Select.ar(K2A.ar(isSlow), [delayFast, K2A.ar(delaySlow)]);
-
-	ptr = In.ar(ptrBus, 1);
-	ptr = (ptr - totalDelay) / bufFrames;
-	ptr = ptr % 1;
-	posSec = ptr * BufDur.ir(buf);
-
-	// ---- Fixed position mode (PD: spigot gates between phasor and static slider) ----
-	posSec = Select.ar(K2A.ar(fixedPos), [posSec, DC.ar(fixedPosSec)]);
 
 	// ---- Envelope and trigger ----
 	env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);
@@ -214,6 +195,104 @@ SynthDef.new(\gran, {
 
 	// ---- Panning ----
 	panCtrl = LFNoise1.kr(100).bipolar(panRand);
+
+	// ============================================================
+	// Trajectory-based playhead safety
+	// ============================================================
+	// Instead of a naive dead zone around the record pointer, we
+	// derive the grain's full read path over its lifetime and test
+	// whether it intersects the moving record pointer in the
+	// circular buffer.
+	//
+	// Model:
+	//   grainRead(t) = center - 0.5*durSamp*grainRate + t*grainRate
+	//   recHead(t)   = recPos + t*recSpeedSamp
+	//   d(t)         = grainRead(t) - recHead(t)
+	//                = d0 + t*relSpeed        (linear in t)
+	// where d0 = center - 0.5*durSamp*grainRate - recPos
+	//       relSpeed = grainRate - recSpeedSamp
+	//
+	// The grain is unsafe iff d(t) ≡ 0 (mod bufFrames) for any
+	// t in [0, durSamp], i.e. any integer multiple of bufFrames
+	// falls within [min(d0,dEnd)-margin, max(d0,dEnd)+margin].
+	// ============================================================
+
+	bufFrames = BufFrames.ir(buf);
+	safeMarginSamples = safeMargin * SampleRate.ir;
+
+	// Record pointer position (buffer frames, audio rate)
+	ptr = In.ar(ptrBus, 1);
+
+	// Record pointer speed (buffer frames per output sample)
+	recSpeedSamp = BufRateScale.kr(buf) * ptrSpeed;
+
+	// Final grain rate (buffer frames per output sample, after all modulation)
+	grainRate = rateCtrl;
+
+	// Grain duration in output samples
+	durSamp = durCtrl * SampleRate.ir;
+
+	// Desired delay with jitter (samples)
+	ptrRand = LFNoise1.ar(100).bipolar(ptrRandSamples);
+	desiredDelay = (ptrSampleDelay - ptrRand).max(minPtrDelay);
+
+	// Candidate center in buffer frames (wrapped to buffer range)
+	candidateCenter = (ptr - desiredDelay).wrap(0, bufFrames);
+
+	// --- Distance trajectory ---
+	// d(t) = grainRead(t) - recHead(t) = d0 + t * relSpeed
+	d0       = candidateCenter - (0.5 * durSamp * grainRate) - ptr;
+	relSpeed = grainRate - recSpeedSamp;
+	dEnd     = d0 + (durSamp * relSpeed);
+
+	dMin = d0.min(dEnd);
+	dMax = d0.max(dEnd);
+
+	// --- Intersection test ---
+	// Unsafe if any integer k satisfies  dMin-margin <= k*bufFrames <= dMax+margin
+	aCheck = dMin - safeMarginSamples;
+	bCheck = dMax + safeMarginSamples;
+	kLow   = (aCheck / bufFrames).ceil;
+	kHigh  = (bCheck / bufFrames).floor;
+	isUnsafe = kHigh >= kLow;  // 1.0 if unsafe, 0.0 if safe
+
+	// --- Snap to nearest safe center ---
+	// Primary problematic k (closest to midpoint of d-range)
+	kPrimary = ((d0 + dEnd) * 0.5 / bufFrames).round;
+
+	// Shift options to escape the unsafe zone around k*bufFrames:
+	//   Forward:  move center so dMin rises above k*bufFrames + margin
+	//   Backward: move center so dMax drops below k*bufFrames - margin
+	snapFwd = (kPrimary * bufFrames) + safeMarginSamples - dMin;
+	snapBwd = (kPrimary * bufFrames) - safeMarginSamples - dMax;
+
+	// Pick the smaller-magnitude snap to preserve user's delay/jitter
+	snapDelta = Select.ar(
+		(snapFwd.abs <= snapBwd.abs),
+		[snapBwd, snapFwd]
+	);
+
+	// If the grain's d-range spans the entire buffer, no position is
+	// fully safe.  Fall back to half-buffer offset from the record head.
+	dSpan = (durSamp * relSpeed).abs;
+	spanExceedsBuffer = (dSpan + (2 * safeMarginSamples)) >= bufFrames;
+	fallbackCenter = (ptr - (bufFrames * 0.5)).wrap(0, bufFrames);
+
+	// Chain: candidate → snap if unsafe → fallback if span exceeds buffer
+	safeCenter = Select.ar(
+		isUnsafe,
+		[candidateCenter, (candidateCenter + snapDelta).wrap(0, bufFrames)]
+	);
+	safeCenter = Select.ar(
+		spanExceedsBuffer,
+		[safeCenter, fallbackCenter]
+	);
+
+	// Convert to seconds for TGrains centerPos
+	posSec = safeCenter / bufFrames * BufDur.ir(buf);
+
+	// ---- Fixed position mode (PD: spigot gates between phasor and static slider) ----
+	posSec = Select.ar(K2A.ar(fixedPos), [posSec, DC.ar(fixedPosSec)]);
 
 	// ---- TGrains ----
 	sig = TGrains.ar(
