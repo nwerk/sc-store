@@ -169,7 +169,6 @@ OSCdef('/grain/stopAudio', { |msg|
 	if (msg[1] >= 1.0) {
 		"Stopping all audio...".postln;
 		~speedUpdater.stop;
-		~fbUpdater.stop;
 		~bufLenUpdater.stop;
 		s.freeAll;
 	};

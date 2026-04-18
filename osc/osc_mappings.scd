@@ -74,7 +74,7 @@
 	freqModAmt:  ( index:58 ),
 	freqModFreq: ( index:59 ),
 	panRand:  ( index:60 ),
-	param61:  ( index:61 ),
+	filterFreq: ( index:61 ),
 	masterVol:( index:62 ),
 	param63:  ( index:63 ),
 	param64:  ( index:64 ),
@@ -169,6 +169,7 @@
 	'/grain/freqModFreq': ( busIndex: 59, type: \fader, label: "Freq Mod Freq" ),
 	'/grain/bitDepth':    ( busIndex: 54, type: \fader, label: "Bit Depth" ),
 	'/grain/panRand':     ( busIndex: 60, type: \fader, label: "Pan Random" ),
+	'/grain/filterFreq':  ( busIndex: 61, type: \fader, label: "Filter Freq" ),
 
 	// ---- Master (persistent across pages) ----
 	'/master/volume':     ( busIndex: 62, type: \fader, label: "Master Volume" ),

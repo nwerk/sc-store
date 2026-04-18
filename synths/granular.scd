@@ -25,17 +25,18 @@ SynthDef.new(\ptr, {
 
 SynthDef.new(\rec, {
 	|
+	ccBus=0,
 	ptrIn=0,
 	micIn=0,
 	bufIn=0,
 	buf=0,
-	fb=0.8,
 	recGate=0,
 	// crossfade duration in seconds (tweak as needed)
 	xfadeTime=1
 	|
-	var ptr, sig, bufSig, frames, xfadeSamples, endIdx, w, startXSig, writeSig, recEnv;
-	fb = 0.5;
+	var ccVals, ptr, sig, bufSig, frames, xfadeSamples, endIdx, w, startXSig, writeSig, recEnv, fb;
+	ccVals = In.kr(ccBus, 128);
+	fb = Select.kr(~busNames[\feedback].index, ccVals);
 	ptr = In.ar(ptrIn, 1);
 	sig = In.ar(micIn, 1);
 
@@ -44,7 +45,7 @@ SynthDef.new(\rec, {
 	sig = sig * recEnv;
 
 	bufSig = BufRd.ar(1, buf, ptr, 1, 2);
-	sig = 0.5 * (sig + (bufSig * fb));
+	sig = (sig * (1 - fb)) + (bufSig * fb);
 
 	// crossfade setup
 	frames = BufFrames.kr(buf);
@@ -139,8 +140,8 @@ SynthDef.new(\gran, {
 	// CC 60: panning amount (0–1)
 	panRand = Select.kr(~busNames[\panRand].index, ccVals);
 
-	// CC 54: bit depth — PD: val + 0.05 (range ~0.05–1.05)
-	bitDepth = Select.kr(~busNames[\bitDepth].index, ccVals) + 0.05;
+	// CC 54: bit depth — 0 = clean, 1 = heavy crush (inverted: 0→1.05, 1→0.05)
+	bitDepth = (1 - Select.kr(~busNames[\bitDepth].index, ccVals)) + 0.05;
 
 	// CC 58: freq mod amount — PD: ÷127 × 50
 	freqModAmt = Select.kr(~busNames[\freqModAmt].index, ccVals) * 50;
@@ -159,6 +160,9 @@ SynthDef.new(\gran, {
 
 	// CC 50: octave groups — PD: ÷127 × 50 (int, min 1)
 	octaveGroups = (Select.kr(~busNames[\octaveGroups].index, ccVals) * 50).max(1).round;
+
+	// CC 61: filter cutoff — 0 = open (20kHz), 1 = closed (20Hz) (inverted exponential)
+	filterFreq = (1 - Select.kr(~busNames[\filterFreq].index, ccVals)).linexp(0.0001, 1, 20, 20000);
 
 	// ---- Envelope and trigger ----
 	env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);

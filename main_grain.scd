@@ -30,10 +30,10 @@ s.waitForBoot{
     ~mic = Synth(\mic, [\in, 0, \out, ~micBus], ~micGrp);
     ~ptr = Synth(\ptr, [\out, ~ptrBus, \buf, b, \speed, 1], ~ptrGrp);
     ~rec = Synth(\rec, [
+		\ccBus, ~ccBuses,
 		\ptrIn, ~ptrBus,
 		\micIn, ~micBus,
 		\buf, b,
-		\fb, 0,
 		\recGate, 0,
 		\xfadeTime, 0.05
 	], ~recGrp);
@@ -145,16 +145,6 @@ s.waitForBoot{
 				~ptr.set(\speed, speed);
 			});
 			0.05.wait; // 50ms update rate
-		};
-	}).play(AppClock);
-
-	// ---- CC 46: Feedback → update \rec fb in real time ----
-	~fbUpdater = Routine({
-		inf.do {
-			~ccBuses.getn(46, 1, { |val|
-				~rec.set(\fb, val[0]);
-			});
-			0.05.wait;
 		};
 	}).play(AppClock);
 
