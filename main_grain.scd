@@ -170,7 +170,12 @@ s.waitForBoot{
 	// ---- Send full state to TouchOSC on boot ----
 	// (short delay so synths are fully ready)
 	AppClock.sched(0.5, {
-		~sendAllState.();
+		// Load preset 0 on startup if it exists, otherwise just sync state
+		if (~presetExists.(0)) {
+			~loadPreset.(0);
+		} {
+			~sendAllState.();
+		};
 		nil; // don't reschedule
 	});
 

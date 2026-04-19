@@ -14,12 +14,34 @@
 // Change ~touchOSCip to your tablet's IP address.
 // TouchOSC default receive port: 9000
 // sclang default listen port: 57120 (NetAddr.langPort)
-~touchOSCip   = "192.168.1.100";
+~touchOSCip   = "192.168.178.75";
 ~touchOSCport = 9000;
 ~touchOSC     = NetAddr(~touchOSCip, ~touchOSCport);
 
 "TouchOSC target: % : %".format(~touchOSCip, ~touchOSCport).postln;
 "SC listening on port: %".format(NetAddr.langPort).postln;
+
+// ---- OSC debug logging ----
+// Logs all incoming OSC messages received by this language process.
+~setOscLogging = { |enabled=true|
+	if (enabled) {
+		if (~oscLogger.notNil) { ~oscLogger.free; };
+		~oscLogger = OSCFunc({ |msg, time, addr, recvPort|
+			("[OSC IN] addr:% from:%:% port:% msg:%"
+				.format(msg[0], addr.ip, addr.port, recvPort, msg)
+			).postln;
+		}, nil);
+		"OSC logging enabled (all incoming messages).".postln;
+	} {
+		if (~oscLogger.notNil) {
+			~oscLogger.free;
+			~oscLogger = nil;
+		};
+		"OSC logging disabled.".postln;
+	};
+};
+
+~setOscLogging.(true);
 
 // ---- Feedback helper ----
 // Send a single float value back to TouchOSC on the given address.
@@ -29,12 +51,11 @@
 
 // ---- Send all fader + toggle state to TouchOSC (boot sync / preset load) ----
 ~sendAllState = {
-	// Faders: read current ccBus values and send back
+	// Faders: read all bus values at once, then index per address
+	var allVals = ~ccBuses.getnSynchronous(128);
 	~oscMap.keysValuesDo { |addr, spec|
 		if (spec[\type] == \fader) {
-			~ccBuses.getn(spec[\busIndex], 1, { |val|
-				~sendToTouchOSC.(addr, val[0]);
-			});
+			~sendToTouchOSC.(addr, allVals.at(spec[\busIndex]));
 		};
 	};
 
@@ -81,14 +102,15 @@ OSCdef('/grain/record', { |msg|
 }, "/grain/record");
 
 OSCdef('/grain/liveMode', { |msg|
-	if (msg[1] >= 1.0) {
-		if (~liveMode) {
-			~stopLiveMode.();
-		} {
+	var isOn = msg[1] >= 0.5;
+	if (isOn != ~liveMode) {
+		if (isOn) {
 			~startLiveMode.();
+		} {
+			~stopLiveMode.();
 		};
-		~sendToTouchOSC.('/grain/liveMode', ~liveMode.asInteger.asFloat);
 	};
+	~sendToTouchOSC.('/grain/liveMode', isOn.asInteger.asFloat);
 }, "/grain/liveMode");
 
 OSCdef('/grain/reverse', { |msg|
@@ -146,8 +168,11 @@ OSCdef('/grain/octaveUp', { |msg|
 
 OSCdef('/grain/pitchReset', { |msg|
 	if (msg[1] >= 1.0) {
+		var pitchNorm;
 		~currentRate = 1.0;
-		~ccBuses.setAt(~busNames[\rate].index, 1.0.linlin(0.0625, 3.0625, 0, 1).clip(0, 1));
+		pitchNorm = 1.0.linlin(0.0625, 3.0625, 0, 1).clip(0, 1);
+		~ccBuses.setAt(~busNames[\rate].index, pitchNorm);
+		~touchOSC.sendMsg('/grain/pitch-label', pitchNorm.asString);
 		~sendToTouchOSC.('/status/rate', 1.0);
 		"Grain pitch reset to 1.0".postln;
 	};
@@ -173,6 +198,35 @@ OSCdef('/grain/stopAudio', { |msg|
 		s.freeAll;
 	};
 }, "/grain/stopAudio");
+
+// ---- Heartbeat ----
+// Pulses /status/heartbeat: short ON then long OFF, repeating.
+// Button is lit while SC is alive; goes dark if the process stops.
+~heartbeatOnTime  = 0.3;   // seconds the button stays ON
+~heartbeatPeriod  = 1.0;    // full period (ON + OFF) in seconds
+
+~stopHeartbeat = {
+	if (~heartbeatRoutine.notNil) {
+		~heartbeatRoutine.stop;
+		~heartbeatRoutine = nil;
+	};
+	~sendToTouchOSC.('/status/heartbeat', 0.0);
+};
+
+~startHeartbeat = {
+	~stopHeartbeat.();
+	~heartbeatRoutine = Routine({
+		loop {
+			~sendToTouchOSC.('/status/heartbeat', 1.0);
+			~heartbeatOnTime.wait;
+			~sendToTouchOSC.('/status/heartbeat', 0.0);
+			(~heartbeatPeriod - ~heartbeatOnTime).wait;
+		};
+	}).play(AppClock);
+	"Heartbeat started (period: %s, on-time: %s).".format(~heartbeatPeriod, ~heartbeatOnTime).postln;
+};
+
+~startHeartbeat.();
 
 "OSC responders registered.".postln;
 )

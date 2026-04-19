@@ -46,10 +46,11 @@ if (File.exists(~presetDir).not) {
 	var data = Dictionary.new;
 	var path = ~presetPath.(index);
 	var faderVals = Dictionary.new;
+	var allVals = ~ccBuses.getnSynchronous(128);
 
-	// Read fader values from ccBuses synchronously using .getSynchronous
+	// Read fader values from a full synchronous bus snapshot
 	~presetFaderIndices.do { |busIdx|
-		faderVals[busIdx] = ~ccBuses.getSynchronous(busIdx);
+		faderVals[busIdx] = allVals.at(busIdx);
 	};
 	data[\faders] = faderVals;
 
