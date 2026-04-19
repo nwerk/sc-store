@@ -62,7 +62,7 @@ defaults.keysValuesDo { |busIdx, val|
 ~liveMode      = false;
 ~reverseState  = false;
 ~fixedPosState = false;
-~muteState     = false;
+~fftFreezeState = false;
 ~currentRate   = 1.0;
 
 // Save as preset slot 0

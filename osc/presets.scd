@@ -59,7 +59,7 @@ if (File.exists(~presetDir).not) {
 	data[\liveMode]      = ~liveMode.asInteger;
 	data[\reverseState]  = ~reverseState.asInteger;
 	data[\fixedPosState] = ~fixedPosState.asInteger;
-	data[\muteState]     = ~muteState.asInteger;
+	data[\fftFreezeState] = ~fftFreezeState.asInteger;
 	data[\currentRate]   = ~currentRate;
 
 	// Write to disk
@@ -88,7 +88,7 @@ if (File.exists(~presetDir).not) {
 		~liveMode      = data[\liveMode].asBoolean;
 		~reverseState  = data[\reverseState].asBoolean;
 		~fixedPosState = data[\fixedPosState].asBoolean;
-		~muteState     = data[\muteState].asBoolean;
+		~fftFreezeState = (data[\fftFreezeState] ? data[\muteState] ? 0).asBoolean;
 		~currentRate   = data[\currentRate] ? 1.0;
 
 		// Apply toggle states to synths
@@ -96,11 +96,7 @@ if (File.exists(~presetDir).not) {
 		if (~liveMode) { ~startLiveMode.() } { ~stopLiveMode.() };
 		~g.set(\reverseGrain, ~reverseState.asInteger);
 		~g.set(\fixedPos, ~fixedPosState.asInteger);
-		if (~muteState) {
-			~g.set(\amp, 0);
-		} {
-			~g.set(\amp, ~prevAmp);
-		};
+		~fftFx.set(\freeze, ~fftFreezeState.asInteger);
 		~g.set(\rate, ~currentRate);
 
 		~activePreset = index;

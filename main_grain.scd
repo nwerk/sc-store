@@ -8,6 +8,7 @@ thisProcess.interpreter.executeFile(~basePath ++ "osc/osc_mappings.scd");
 // MIDI kept for Boss FS-1-WL foot controller
 thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/granular.scd");
+thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
 
 s.waitForBoot{
 	// ---- Buffer setup ----
@@ -17,6 +18,7 @@ s.waitForBoot{
 	// ---- Audio buses ----
 	~micBus = Bus.audio(s, 1);
     ~ptrBus = Bus.audio(s, 1);
+	~fftInBus = Bus.audio(s, 1);
 	s.sync;
 
 	// ---- Synth groups (ordered for signal flow) ----
@@ -24,6 +26,7 @@ s.waitForBoot{
     ~ptrGrp = Group.after(~micGrp);
     ~recGrp = Group.after(~ptrGrp);
     ~granGrp = Group.after(~recGrp);
+	~fftGrp = Group.after(~granGrp);
 	s.sync;
 
 	// ---- Synth instances ----
@@ -42,7 +45,7 @@ s.waitForBoot{
 		\ccBus, ~ccBuses,
         \amp, 0.5,
 		\buf, b,
-		\out, 0,
+		\out, ~fftInBus,
 		\atk, 0,
 		\rel, 1,
 		\gate, 1,
@@ -74,14 +77,23 @@ s.waitForBoot{
 		\octaveGroups, 1,
     ], ~granGrp);
 
+	~fftFx = Synth(\fftFreeze, [
+		\micIn, ~micBus,
+		\granIn, ~fftInBus,
+		\ccBus, ~ccBuses,
+		\out, 0,
+		\freeze, 0,
+		\fftFilterAmt, 0,
+		\morphAmt, 0,
+	], ~fftGrp);
+
 	// ---- State variables for toggles ----
 	~recState = false;
 	~liveMode = false;
 	~liveRoutine = nil;
 	~reverseState = false;
 	~fixedPosState = false;
-	~muteState = false;
-	~prevAmp = 0.5;
+	~fftFreezeState = false;
 	~currentRate = 1.0;
 
 	// ---- Buffer management functions ----
@@ -183,4 +195,3 @@ s.waitForBoot{
 	s.meter;
 };
 )
-

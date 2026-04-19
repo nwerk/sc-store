@@ -64,7 +64,7 @@
 	~sendToTouchOSC.('/grain/liveMode',  ~liveMode.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/reverse',   ~reverseState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fixedPos',  ~fixedPosState.asInteger.asFloat);
-	~sendToTouchOSC.('/grain/mute',      ~muteState.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat);
 
 	// Status
 	~sendToTouchOSC.('/status/rate',      ~currentRate.asFloat);
@@ -131,20 +131,14 @@ OSCdef('/grain/fixedPos', { |msg|
 	};
 }, "/grain/fixedPos");
 
-OSCdef('/grain/mute', { |msg|
+OSCdef('/grain/fftFreeze', { |msg|
 	if (msg[1] >= 1.0) {
-		~muteState = ~muteState.not;
-		if (~muteState) {
-			~prevAmp = ~ccBuses.getnSynchronous(128).at(~busNames[\masterVol].index);
-			~ccBuses.setAt(~busNames[\masterVol].index, 0);
-			"MUTED".postln;
-		} {
-			~ccBuses.setAt(~busNames[\masterVol].index, ~prevAmp);
-			"UNMUTED".postln;
-		};
-		~sendToTouchOSC.('/grain/mute', ~muteState.asInteger.asFloat);
+		~fftFreezeState = ~fftFreezeState.not;
+		~fftFx.set(\freeze, ~fftFreezeState.asInteger);
+		~sendToTouchOSC.('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat);
+		("FFT Freeze: " ++ if(~fftFreezeState, "ON", "OFF")).postln;
 	};
-}, "/grain/mute");
+}, "/grain/fftFreeze");
 
 // ---- Momentary OSCdefs ----
 
