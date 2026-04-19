@@ -77,8 +77,8 @@
 	filterFreq: ( index:61 ),
 	masterVol:( index:62 ),
 	param63:  ( index:63 ),
-	param64:  ( index:64 ),
-	param65:  ( index:65 ),
+	fftFilter: ( index:64 ),
+	fftMorph:  ( index:65 ),
 	param66:  ( index:66 ),
 	param67:  ( index:67 ),
 	param68:  ( index:68 ),
@@ -96,7 +96,7 @@
 	master_vol:  ( index:80, isLatch:true ),
 	param81:  ( index:81 ),
 	param82:  ( index:82 ),
-	param83:  ( index:83 ),
+	fftFreeze: ( index:83, isLatch: true ),
 	param84:  ( index:84 ),
 	param85:  ( index:85 ),
 	param86:  ( index:86 ),
@@ -170,6 +170,8 @@
 	'/grain/bitDepth':    ( busIndex: 54, type: \fader, label: "Bit Depth" ),
 	'/grain/panRand':     ( busIndex: 60, type: \fader, label: "Pan Random" ),
 	'/grain/filterFreq':  ( busIndex: 61, type: \fader, label: "Filter Freq" ),
+	'/grain/fftFilter':   ( busIndex: 64, type: \fader, label: "FFT Filter" ),
+	'/grain/fftMorph':    ( busIndex: 65, type: \fader, label: "FFT Morph" ),
 
 	// ---- Master (persistent across pages) ----
 	'/master/volume':     ( busIndex: 62, type: \fader, label: "Master Volume" ),
@@ -179,7 +181,7 @@
 	'/grain/liveMode':    ( type: \toggle, label: "Live Mode" ),
 	'/grain/reverse':     ( type: \toggle, label: "Reverse" ),
 	'/grain/fixedPos':    ( type: \toggle, label: "Fixed Position" ),
-	'/grain/mute':        ( type: \toggle, label: "Mute" ),
+	'/grain/fftFreeze':   ( type: \toggle, label: "FFT Freeze" ),
 
 	// ---- Momentary (Page 4) ----
 	'/grain/octaveDown':  ( type: \momentary, label: "Octave Down" ),
