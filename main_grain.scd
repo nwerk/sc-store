@@ -18,7 +18,7 @@ s.waitForBoot{
 	// ---- Audio buses ----
 	~micBus = Bus.audio(s, 1);
     ~ptrBus = Bus.audio(s, 1);
-	~fftInBus = Bus.audio(s, 1);
+	~fftInBus = Bus.audio(s, 2);
 	s.sync;
 
 	// ---- Synth groups (ordered for signal flow) ----

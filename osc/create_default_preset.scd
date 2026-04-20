@@ -31,6 +31,7 @@
 //   busIndex 59  freqModFreq   0.0    → LFO pitch mod rate off
 //   busIndex 60  panRand       0.3    → moderate stereo spread
 //   busIndex 62  masterVol     0.8    → 80% output volume
+//   busIndex 66  fftFreezeVol  0.5    → 50% FFT freeze channel volume
 
 var defaults = Dictionary[
 	16 -> 0.5,
@@ -49,7 +50,8 @@ var defaults = Dictionary[
 	58 -> 0.0,
 	59 -> 0.0,
 	60 -> 0.3,
-	62 -> 0.8
+	62 -> 0.8,
+	66 -> 0.5      // fftFreezeVol: 50% FFT effect level
 ];
 
 // Apply to ccBuses

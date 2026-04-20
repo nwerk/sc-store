@@ -134,7 +134,7 @@ OSCdef('/grain/fixedPos', { |msg|
 OSCdef('/grain/fftFreeze', { |msg|
 	if (msg[1] >= 1.0) {
 		~fftFreezeState = ~fftFreezeState.not;
-		~fftFx.set(\freeze, ~fftFreezeState.asInteger);
+		~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
 		~sendToTouchOSC.('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat);
 		("FFT Freeze: " ++ if(~fftFreezeState, "ON", "OFF")).postln;
 	};

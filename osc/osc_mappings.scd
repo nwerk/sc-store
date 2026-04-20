@@ -79,7 +79,7 @@
 	param63:  ( index:63 ),
 	fftFilter: ( index:64 ),
 	fftMorph:  ( index:65 ),
-	param66:  ( index:66 ),
+	fftFreezeVol: ( index:66 ),
 	param67:  ( index:67 ),
 	param68:  ( index:68 ),
 	param69:  ( index:69 ),
@@ -172,6 +172,7 @@
 	'/grain/filterFreq':  ( busIndex: 61, type: \fader, label: "Filter Freq" ),
 	'/grain/fftFilter':   ( busIndex: 64, type: \fader, label: "FFT Filter" ),
 	'/grain/fftMorph':    ( busIndex: 65, type: \fader, label: "FFT Morph" ),
+	'/grain/fftFreezeVol': ( busIndex: 66, type: \fader, label: "FFT Freeze Volume" ),
 
 	// ---- Master (persistent across pages) ----
 	'/master/volume':     ( busIndex: 62, type: \fader, label: "Master Volume" ),

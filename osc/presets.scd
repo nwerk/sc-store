@@ -96,7 +96,7 @@ if (File.exists(~presetDir).not) {
 		if (~liveMode) { ~startLiveMode.() } { ~stopLiveMode.() };
 		~g.set(\reverseGrain, ~reverseState.asInteger);
 		~g.set(\fixedPos, ~fixedPosState.asInteger);
-		~fftFx.set(\freeze, ~fftFreezeState.asInteger);
+		~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
 		~g.set(\rate, ~currentRate);
 
 		~activePreset = index;

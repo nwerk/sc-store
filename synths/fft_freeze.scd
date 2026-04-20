@@ -6,28 +6,44 @@ SynthDef.new(\fftFreeze, {
 	ccBus=0,
 	freeze=0,
 	fftFilterAmt=0,
-	morphAmt=0
+	morphAmt=0,
+	fftVol=0
 	|
-	var ccVals, micSig, granSig, micChain, granChain, morphedChain, sig, wipe;
+	var ccVals, micSig, granSig, micChain, micChainCopy,
+	    granChainL, granChainR, morphedChainL, morphedChainR,
+	    fftSig, wipe;
 
 	ccVals = In.kr(ccBus, 128);
-	freeze = Select.kr(~busNames[\fftFreeze].index, ccVals);
-	fftFilterAmt = Select.kr(~busNames[\fftFilter].index, ccVals);
-	morphAmt = Select.kr(~busNames[\fftMorph].index, ccVals);
+	freeze       = Select.kr(~busNames[\fftFreeze].index,    ccVals);
+	fftFilterAmt = Select.kr(~busNames[\fftFilter].index,    ccVals);
+	morphAmt     = Select.kr(~busNames[\fftMorph].index,     ccVals);
+	fftVol       = Select.kr(~busNames[\fftFreezeVol].index, ccVals);
 
-	micSig = In.ar(micIn, 1);
-	granSig = In.ar(granIn, 1);
+	micSig  = In.ar(micIn,  1);
+	granSig = In.ar(granIn, 2);  // stereo granular
 
+	// Frozen + filtered mic chain (shared source for both stereo paths)
 	micChain = FFT(LocalBuf(2048), micSig);
-	granChain = FFT(LocalBuf(2048), granSig);
-
 	micChain = PV_Freeze(micChain, freeze);
-	wipe = fftFilterAmt.linlin(0, 1, 0, -1);
+	wipe     = fftFilterAmt.linlin(0, 1, 0, -1);
 	micChain = PV_BrickWall(micChain, wipe);
-	morphedChain = PV_Morph(micChain, granChain, morphAmt);
 
-	sig = IFFT(morphedChain);
-	Out.ar(out, sig ! 2);
+	// Duplicate frozen mic chain for independent L and R morphing
+	micChainCopy = PV_Copy(micChain, LocalBuf(2048));
+
+	// Separate FFT chains for stereo granular
+	granChainL = FFT(LocalBuf(2048), granSig[0]);
+	granChainR = FFT(LocalBuf(2048), granSig[1]);
+
+	// Stereo morph: frozen mic × granular L and R independently
+	morphedChainL = PV_Morph(micChain,     granChainL, morphAmt);
+	morphedChainR = PV_Morph(micChainCopy, granChainR, morphAmt);
+
+	// FFT signal with independent volume control
+	fftSig = [IFFT(morphedChainL), IFFT(morphedChainR)] * fftVol;
+
+	// Mix FFT effect with dry stereo granular (granular already has amp applied)
+	Out.ar(out, fftSig + granSig);
 }).add;
 
 "SynthDef \\fftFreeze added to server.".postln;
