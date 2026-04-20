@@ -42,7 +42,9 @@ SynthDef.new(\fftFreeze, {
 	// FFT signal with independent volume control
 	fftSig = [IFFT(morphedChainL), IFFT(morphedChainR)] * fftVol;
 
-	// Mix FFT effect with dry stereo granular (granular already has amp applied)
+	// Mix FFT effect with dry stereo granular.
+	// fftFreezeVol scales the FFT (freeze/morph) layer independently;
+	// granular level is managed upstream by masterVol (CC 62) in the gran synth.
 	Out.ar(out, fftSig + granSig);
 }).add;
 
