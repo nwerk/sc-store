@@ -45,7 +45,9 @@ SynthDef.new(\rec, {
 	sig = sig * recEnv;
 
 	bufSig = BufRd.ar(1, buf, ptr, 1, 2);
-	sig = (sig * (1 - fb)) + (bufSig * fb);
+	// overdub: buffer preserved at fb level, mic always added on top
+	// clip~ -1 1 prevents volume buildup (matches PD behavior)
+	sig = (sig + (bufSig * fb)).clip(-1, 1);
 
 	// crossfade setup
 	frames = BufFrames.kr(buf);
@@ -81,7 +83,7 @@ SynthDef.new(\gran, {
 	ptrBus=0,
 	ptrSampleDelay=20000,
 	ptrRandSamples=5000,
-	minPtrDelay=1000,
+	minPtrDelay=0,
 	// extra safety margin so the grain read window never reaches the write head
 	safeMargin=0.02, // seconds
 	filterFreq=1000,
@@ -102,7 +104,7 @@ SynthDef.new(\gran, {
 	ptr, ptrRand, posSec,
 	// helpers
 	bufFrames, safeMarginSamples,
-	octaveMultiplier, detuneOffset, freqMod, bitStepSize, bitCrushed,
+	octaveMultiplier, detuneOffset, freqMod, bitStepSize, bitCrushed, tanhDrive,
 	octaveGate,
 	// trajectory-based playhead safety
 	ptrSpeed, recSpeedSamp, durSamp, grainRate, desiredDelay,
@@ -114,11 +116,9 @@ SynthDef.new(\gran, {
 	// ---- CC bus reads (PD CC mapping) ----
 	ccVals = In.kr(ccBus, 128);
 
-	// CC 62: master volume (0–1), default to arg value when CC is 0
-	amp = Select.kr(~busNames[\masterVol].index, ccVals).max(amp);
-
 	// CC 17: density — PD sends interval in ms (0–800), invert to Hz
-	dens = Select.kr(~busNames[\density].index, ccVals).linlin(0, 1, 0.001, 1);
+	// .squared gives exponential taper: finer control at low (sparse) values
+	dens = Select.kr(~busNames[\density].index, ccVals).squared.linlin(0, 1, 0.001, 1);
 	dens = (1.0 / (dens * 0.8).max(0.005)); // 0–800ms → Hz (min ~1.25 Hz, max ~200 Hz)
 
 	// CC 21: grain duration — PD: 0–1000ms
@@ -128,7 +128,7 @@ SynthDef.new(\gran, {
 	rate = Select.kr(~busNames[\rate].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
 
 	// CC 22: jitter (ptrRandSamples) — PD: ÷127 × 3000 samples
-	ptrRandSamples = Select.kr(~busNames[\jitter].index, ccVals) * 3000;
+	ptrRandSamples = Select.kr(~busNames[\jitter].index, ccVals) * 30000;
 
 	// CC 55: playback speed — PD: ÷127 × 3 + 0.0625
 	// Also applied to \ptr via main_grain.scd; read here for trajectory safety calc
@@ -156,7 +156,7 @@ SynthDef.new(\gran, {
 	randDetune = Select.kr(~busNames[\randDetune].index, ccVals) * 100;
 
 	// CC 18: random octave — PD: ÷127 × 4 (int, min 1)
-	randomOctave = (Select.kr(~busNames[\randomOctave].index, ccVals) * 4).max(1).round;
+	randomOctave = (Select.kr(~busNames[\randomOctave].index, ccVals) * 4).max(0).round;
 
 	// CC 50: octave groups — PD: ÷127 × 50 (int, min 1)
 	octaveGroups = (Select.kr(~busNames[\octaveGroups].index, ccVals) * 50).max(1).round;
@@ -313,12 +313,16 @@ SynthDef.new(\gran, {
 
 	sig = sig * env * amp;
 
-	// ---- Bit crusher (PD: per-grain, here post-TGrains) ----
+	// ---- Bit crusher → tanh soft-clip (both driven by bitDepth knob) ----
 	// bitDepth 0.05–1.05 → 2–16 bit quantization
 	// step size = 1 / (2^(bitDepth*14+2) - 1)
 	bitStepSize = 1 / ((2.pow((bitDepth * 14 + 2).round)) - 1);
 	bitCrushed = (sig / bitStepSize).round * bitStepSize * bitVol;
-	// Crossfade: when bitDepth >= 1.0 use clean signal, otherwise crushed
+	// tanh soft-clip applied after bitcrush: smooths quantization edges
+	// drive=1 at bitDepth just below 1.0 (Select.ar handles fully clean above) → drive=30 at max crush
+	tanhDrive = K2A.ar(bitDepth.linlin(0.05, 1.05, 100, 1));
+	bitCrushed = tanh(bitCrushed * tanhDrive) / tanhDrive;
+	// Crossfade: when bitDepth >= 1.0 use clean signal, otherwise crushed+distorted
 	sig = Select.ar(K2A.ar(bitDepth >= 1.0), [bitCrushed, sig]);
 
 	// ---- Filter (independent from bitDepth) ----

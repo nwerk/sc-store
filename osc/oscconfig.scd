@@ -89,6 +89,18 @@
 	};
 };
 
+// ---- Density fader: echo raw value + send scaled Hz to label ----
+OSCdef('/grain/density', { |msg|
+	var val, densScaled, densHz;
+	val = msg[1].clip(0.0, 1.0);
+	~ccBuses.setAt(~busNames[\density].index, val);
+	~sendToTouchOSC.('/grain/density', val);
+	// Apply the same squared taper used in the synth and convert to Hz
+	densScaled = val.squared.linlin(0, 1, 0.001, 1);
+	densHz = 1.0 / (densScaled * 0.8).max(0.005);
+	~touchOSC.sendMsg('/grain/density-label', densHz.round(0.1).asString ++ " Hz");
+}, "/grain/density");
+
 // ---- Toggle OSCdefs ----
 // TouchOSC sends 1.0 on tap; SC flips internal state and sends new state back.
 
@@ -141,6 +153,11 @@ OSCdef('/grain/fftFreeze', { |msg|
 }, "/grain/fftFreeze");
 
 // ---- Momentary OSCdefs ----
+
+// ---- Master volume: override generic fader to drive synth arg directly ----
+OSCdef('/master/volume', { |msg|
+	~setMasterVol.(msg[1]);
+}, "/master/volume");
 
 OSCdef('/grain/octaveDown', { |msg|
 	if (msg[1] >= 1.0) {

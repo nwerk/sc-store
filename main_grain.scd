@@ -9,6 +9,7 @@ thisProcess.interpreter.executeFile(~basePath ++ "osc/osc_mappings.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/granular.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
+thisProcess.interpreter.executeFile(~basePath ++ "classes/master.scd");
 
 s.waitForBoot{
 	// ---- Buffer setup ----
@@ -19,6 +20,7 @@ s.waitForBoot{
 	~micBus = Bus.audio(s, 1);
     ~ptrBus = Bus.audio(s, 1);
 	~fftInBus = Bus.audio(s, 2);
+	~masterInBus = Bus.audio(s, 2);
 	s.sync;
 
 	// ---- Synth groups (ordered for signal flow) ----
@@ -27,6 +29,7 @@ s.waitForBoot{
     ~recGrp = Group.after(~ptrGrp);
     ~granGrp = Group.after(~recGrp);
 	~fftGrp = Group.after(~granGrp);
+	~masterGrp = Group.after(~fftGrp);
 	s.sync;
 
 	// ---- Synth instances ----
@@ -43,7 +46,7 @@ s.waitForBoot{
 
     ~g = Synth(\gran, [
 		\ccBus, ~ccBuses,
-        \amp, 0.5,
+        \amp, 1.0,  // master synth handles overall volume via CC 62
 		\buf, b,
 		\out, ~fftInBus,
 		\atk, 0,
@@ -81,11 +84,27 @@ s.waitForBoot{
 		\micIn, ~micBus,
 		\granIn, ~fftInBus,
 		\ccBus, ~ccBuses,
-		\out, 0,
+		\out, ~masterInBus,
 		\freeze, 0,
 		\fftFilterAmt, 0,
 		\morphAmt, 0,
 	], ~fftGrp);
+
+	~master = Synth(\master, [
+		\inBus, ~masterInBus,
+		\ccBus, ~ccBuses,
+		\out, 0,
+	], ~masterGrp);
+
+	// ---- Master volume helper ----
+	// Single point of control: sets synth arg + CC bus + sends to TouchOSC.
+	~setMasterVol = { |val|
+		val = val.clip(0.0, 1.0);
+		~ccBuses.setAt(~busNames[\masterVol].index, val);
+		~touchOSC !? { ~touchOSC.sendMsg('/master/volume', val.asFloat) };
+	};
+
+	~setMasterVol.(1.0);
 
 	// ---- State variables for toggles ----
 	~recState = false;

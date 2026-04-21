@@ -24,7 +24,7 @@
 	param8:   ( index:8 ),
 	param9:   ( index:9 ),
 	param10:  ( index:10 ),
-	param11:  ( index:11 ),
+	masterVol:  ( index:11 ),
 	param12:  ( index:12 ),
 	param13:  ( index:13 ),
 	param14:  ( index:14 ),
@@ -75,7 +75,7 @@
 	freqModFreq: ( index:59 ),
 	panRand:  ( index:60 ),
 	filterFreq: ( index:61 ),
-	masterVol:( index:62 ),
+	param62: ( index:62 ),
 	param63:  ( index:63 ),
 	fftFilter: ( index:64 ),
 	fftMorph:  ( index:65 ),
@@ -93,7 +93,7 @@
 	param77:  ( index:77 ),
 	param78:  ( index:78 ),
 	param79:  ( index:79 ),
-	master_vol:  ( index:80, isLatch:true ),
+	param80:  ( index:80, isLatch:true ),
 	param81:  ( index:81 ),
 	param82:  ( index:82 ),
 	fftFreeze: ( index:83, isLatch: true ),
@@ -175,7 +175,7 @@
 	'/grain/fftFreezeVol': ( busIndex: 66, type: \fader, label: "FFT Freeze Volume" ),
 
 	// ---- Master (persistent across pages) ----
-	'/master/volume':     ( busIndex: 62, type: \fader, label: "Master Volume" ),
+	'/master/volume':     ( busIndex: 11, type: \fader, label: "Master Volume" ),
 
 	// ---- Toggles (Page 4) ----
 	'/grain/record':      ( type: \toggle, label: "Record" ),

@@ -55,5 +55,16 @@ MIDIdef.cc(
     }
 );
 
+// ---- Boss FS-1-WL expression pedal → master volume ----
+// The EXP input sends CC 11 on MIDI channel 11 (SC 0-based index: chan 10).
+// Calls ~setMasterVol which sets the master synth arg, CC bus, and mirrors to TouchOSC.
+// Change ccNum/chan to match your pedal's actual configuration.
+MIDIdef.cc(\expressionPedalMasterVol,
+	{ |val, ccNum, chan, src|
+		~setMasterVol !? { ~setMasterVol.(val / 127.0) };
+	},
+	ccNum: 11
+);
+
 "Config file loaded!".postln;
 )

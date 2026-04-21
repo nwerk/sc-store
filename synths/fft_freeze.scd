@@ -25,7 +25,8 @@ SynthDef.new(\fftFreeze, {
 	// Frozen + filtered mic chain (shared source for both stereo paths)
 	micChain = FFT(LocalBuf(2048), micSig);
 	micChain = PV_Freeze(micChain, freeze);
-	wipe     = fftFilterAmt.linlin(0, 1, 0, -1);
+	// .squared gives exponential taper: finer control at low filter amounts
+	wipe     = fftFilterAmt.squared.linlin(0, 1, 0, -1);
 	micChain = PV_BrickWall(micChain, wipe);
 
 	// Duplicate frozen mic chain for independent L and R morphing

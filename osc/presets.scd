@@ -83,6 +83,9 @@ if (File.exists(~presetDir).not) {
 			~ccBuses.setAt(busIdx.asInteger, val.asFloat);
 		};
 
+		// Apply master volume to synth arg directly (CC bus read alone is not enough)
+		~setMasterVol.(data[\faders][~busNames[\masterVol].index] ? 1.0);
+
 		// Restore toggle states
 		~recState      = data[\recState].asBoolean;
 		~liveMode      = data[\liveMode].asBoolean;
