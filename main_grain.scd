@@ -143,14 +143,20 @@ s.waitForBoot{
 
 	// Allocate a new buffer with given duration in seconds
 	~allocBuffer = { |durSec|
+		var wasRecording = ~recState;
 		durSec = durSec ? ~bufferDurSec;
 		~bufferDurSec = durSec;
+		// Stop recording while swapping the buffer to prevent writes to freed memory
+		~rec.set(\recGate, 0);
 		b.free;
 		b = Buffer.alloc(s, s.sampleRate * durSec, 1, completionMessage: { |buf|
-			("Buffer allocated: " ++ durSec ++ "s (" ++ buf.numFrames ++ " frames)").postln;
 			~ptr.set(\buf, buf);
 			~rec.set(\buf, buf);
 			~g.set(\buf, buf);
+			// Restore recording state if it was active before
+			if (wasRecording) { ~rec.set(\recGate, 1) };
+			("Buffer allocated: " ++ durSec ++ "s (" ++ buf.numFrames ++ " frames)").postln;
+			~sendToTouchOSC !? { ~sendToTouchOSC.('/status/bufferLen', durSec.asFloat) };
 		});
 	};
 
@@ -179,20 +185,8 @@ s.waitForBoot{
 		};
 	}).play(AppClock);
 
-	// ---- CC 16: Buffer Length → reallocate buffer ----
-	~bufLenUpdater = Routine({
-		var lastLen = ~bufferDurSec;
-		inf.do {
-			~ccBuses.getn(16, 1, { |val|
-				var newLen = (val[0] * 8).max(0.01); // 0–8 seconds
-				if ((newLen - lastLen).abs > 0.1) { // only reallocate on significant change
-					lastLen = newLen;
-					~allocBuffer.(newLen);
-				};
-			});
-			0.2.wait; // 200ms — don't reallocate too often
-		};
-	}).play(AppClock);
+	// ---- CC 16: Buffer Length → handled via OSCdef in oscconfig.scd ----
+	// (direct ~allocBuffer call on fader move; no polling routine needed)
 
 	// ---- OSC control layer (TouchOSC faders, toggles, momentaries, presets) ----
 	thisProcess.interpreter.executeFile(~basePath ++ "osc/oscconfig.scd");

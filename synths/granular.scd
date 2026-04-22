@@ -84,249 +84,216 @@ SynthDef.new(\gran, {
 	ptrSampleDelay=20000,
 	ptrRandSamples=5000,
 	minPtrDelay=0,
-	// extra safety margin so the grain read window never reaches the write head
-	safeMargin=0.02, // seconds
+	safeMargin=0.02,   // seconds — grain read window never reaches write head
 	filterFreq=1000,
 	// --- PD-ported parameters ---
-	reverseGrain=0,     // 0/1 toggle: reverse grain playback direction
-	bitDepth=1,         // 0–1 normalized (1 = clean, 0 = crushed)
-	bitVol=1,           // 0–1 bit crusher output volume
-	freqModAmt=0,       // 0–50: LFO depth on pitch
-	freqModFreq=0,      // 0–5 Hz: LFO rate on pitch
-	playGroups=1,       // 1–50: every Nth grain fires
-	fixedPos=0,         // 0/1 toggle: lock grains to a fixed buffer position
-	fixedPosSec=0,      // seconds: fixed position in buffer
-	randDetune=0,       // 0–100: random per-grain micro-detune
-	randomOctave=1,     // 1–4: range of random octave transposition
-	octaveGroups=1      // 1–50: every Nth grain gets octave-shifted
+	reverseGrain=0,    // 0/1: reverse grain playback direction
+	bitDepth=1,        // 0–1 normalized (1 = clean, 0 = crushed)
+	bitVol=1,          // 0–1: bit crusher output volume
+	freqModAmt=0,      // 0–50: LFO depth on pitch
+	freqModFreq=0,     // 0–5 Hz: LFO rate on pitch
+	playGroups=1,      // 1–50: every Nth grain fires
+	fixedPos=0,        // 0/1: lock grains to a fixed buffer position
+	fixedPosSec=0,     // seconds: fixed position in buffer
+	randDetune=0,      // 0–100: random per-grain micro-detune
+	randomOctave=1,    // 1–4: range of random octave transposition
+	octaveGroups=1     // 1–50: every Nth grain gets octave-shifted
 	|
-	var ccVals, sig, env, densCtrl, durCtrl, rateCtrl, panCtrl,
-	ptr, ptrRand, posSec,
-	// helpers
-	bufFrames, safeMarginSamples,
-	octaveMultiplier, detuneOffset, freqMod, bitStepSize, bitCrushed, tanhDrive,
-	octaveGate,
-	// trajectory-based playhead safety
-	ptrSpeed, recSpeedSamp, durSamp, grainRate, desiredDelay,
-	candidateCenter, d0, relSpeed, dEnd, dMin, dMax,
-	aCheck, bCheck, kLow, kHigh, isUnsafe,
-	kPrimary, snapFwd, snapBwd, snapDelta, safeCenter,
-	dSpan, spanExceedsBuffer, fallbackCenter;
 
-	// ---- CC bus reads (PD CC mapping) ----
+	var ccVals;
+	var sig, env;
+	var densCtrl, durCtrl, rateCtrl, panCtrl;
+	var ptr, ptrRand, posSec;
+	var bufFrames, safeMarginSamples;
+	var octaveMultiplier, detuneOffset, freqMod;
+	var bitStepSize, bitCrushed, tanhDrive;
+	var octaveGate;
+	// trajectory-based playhead safety
+	var ptrSpeed, recSpeedSamp, grainRate, durSamp;
+	var desiredDelay, candidateCenter;
+	var d0, relSpeed, dEnd, dMin, dMax;
+	var aCheck, bCheck, kLow, kHigh, isUnsafe;
+	var kPrimary, snapFwd, snapBwd, snapDelta, safeCenter;
+	var dSpan, spanExceedsBuffer, fallbackCenter;
+
+	// ============================================================
+	// 1. CC BUS READS
+	// ============================================================
+
 	ccVals = In.kr(ccBus, 128);
 
-	// CC 17: density — PD sends interval in ms (0–800), invert to Hz
-	// .squared gives exponential taper: finer control at low (sparse) values
-	dens = Select.kr(~busNames[\density].index, ccVals).squared.linlin(0, 1, 0.001, 1);
-	dens = (1.0 / (dens * 0.8).max(0.005)); // 0–800ms → Hz (min ~1.25 Hz, max ~200 Hz)
+	// -- Timing --
+	// CC 17: density — squared taper → sparse grains at low end
+	dens         = Select.kr(~busNames[\density].index, ccVals).squared.linlin(0, 1, 0.001, 1);
+	dens         = 1.0 / (dens * 0.8).max(0.005);            // 0–800ms interval → Hz
+	// CC 21: grain duration (0–1000ms)
+	baseDur      = Select.kr(~busNames[\baseDur].index, ccVals).linlin(0, 1, 0.01, 1.0);
 
-	// CC 21: grain duration — PD: 0–1000ms
-	baseDur = Select.kr(~busNames[\baseDur].index, ccVals).linlin(0, 1, 0.01, 1.0);
-
-	// CC 20: grain pitch — PD: ÷127 × 3 + 0.0625
-	rate = Select.kr(~busNames[\rate].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
-
-	// CC 22: jitter (ptrRandSamples) — PD: ÷127 × 3000 samples
-	ptrRandSamples = Select.kr(~busNames[\jitter].index, ccVals) * 30000;
-
-	// CC 55: playback speed — PD: ÷127 × 3 + 0.0625
-	// Also applied to \ptr via main_grain.scd; read here for trajectory safety calc
-	ptrSpeed = Select.kr(~busNames[\playbackSpeed].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
-
-	// CC 24: playhead randomize — PD: ÷127 × 300
-	ptrSampleDelay = Select.kr(~busNames[\playheadRand].index, ccVals) * 300 + minPtrDelay;
-
-	// CC 60: panning amount (0–1)
-	panRand = Select.kr(~busNames[\panRand].index, ccVals);
-
-	// CC 54: bit depth — 0 = clean, 1 = heavy crush (inverted: 0→1.05, 1→0.05)
-	bitDepth = (1 - Select.kr(~busNames[\bitDepth].index, ccVals)) + 0.05;
-
-	// CC 58: freq mod amount — PD: ÷127 × 50
-	freqModAmt = Select.kr(~busNames[\freqModAmt].index, ccVals) * 50;
-
-	// CC 59: freq mod freq — PD: ÷127 × 5 Hz
-	freqModFreq = Select.kr(~busNames[\freqModFreq].index, ccVals) * 5;
-
-	// CC 25: play groups — PD: ÷127 × 50 (int, min 1)
-	playGroups = (Select.kr(~busNames[\playGroups].index, ccVals) * 50).max(1).round;
-
-	// CC 26: rand detune — PD: ÷127 × 100
-	randDetune = Select.kr(~busNames[\randDetune].index, ccVals) * 100;
-
-	// CC 18: random octave — PD: ÷127 × 4 (int, min 1)
+	// -- Pitch --
+	// CC 20: grain pitch
+	rate         = Select.kr(~busNames[\rate].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
+	// CC 55: playback speed (also drives \ptr; read here for safety calc)
+	ptrSpeed     = Select.kr(~busNames[\playbackSpeed].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
+	// CC 18: random octave range (0–4 semitones)
 	randomOctave = (Select.kr(~busNames[\randomOctave].index, ccVals) * 4).max(0).round;
-
-	// CC 50: octave groups — PD: ÷127 × 50 (int, min 1)
+	// CC 50: octave groups — every Nth grain gets transposed
 	octaveGroups = (Select.kr(~busNames[\octaveGroups].index, ccVals) * 50).max(1).round;
+	// CC 26: per-grain random detune (÷1000 of rate)
+	randDetune   = Select.kr(~busNames[\randDetune].index, ccVals) * 100;
+	// CC 58/59: LFO frequency modulation
+	freqModAmt   = Select.kr(~busNames[\freqModAmt].index, ccVals) * 50;
+	freqModFreq  = Select.kr(~busNames[\freqModFreq].index, ccVals) * 5;
 
-	// CC 61: filter cutoff — 0 = open (20kHz), 1 = closed (20Hz) (inverted exponential)
-	filterFreq = (1 - Select.kr(~busNames[\filterFreq].index, ccVals)).linexp(0.0001, 1, 20, 20000);
+	// -- Playhead --
+	// CC 22: jitter — ±displacement around the base delay (PD: ÷127 × 3000 samples)
+	ptrRandSamples  = Select.kr(~busNames[\jitter].index, ccVals) * (3 * SampleRate.ir);
+	// CC 24: base delay behind the record pointer (PD: ÷127 × 300 ms)
+	ptrSampleDelay  = Select.kr(~busNames[\playheadRand].index, ccVals) * (3 * SampleRate.ir) + minPtrDelay;
 
-	// ---- Envelope and trigger ----
-	env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);
+	// -- Effects --
+	// CC 54: bit depth — inverted so 0=clean, 1=crushed
+	bitDepth     = (1 - Select.kr(~busNames[\bitDepth].index, ccVals)) + 0.05;
+	// CC 61: filter cutoff — inverted exponential (0=open, 1=closed)
+	filterFreq   = (1 - Select.kr(~busNames[\filterFreq].index, ccVals)).linexp(0.0001, 1, 20, 20000);
+
+	// -- Spatial / Grouping --
+	// CC 60: stereo panning spread
+	panRand      = Select.kr(~busNames[\panRand].index, ccVals);
+	// CC 25: play groups — thin the trigger stream (every Nth grain fires)
+	playGroups   = (Select.kr(~busNames[\playGroups].index, ccVals) * 50).max(1).round;
+
+	// ============================================================
+	// 2. ENVELOPE & TRIGGER
+	// ============================================================
+
+	env      = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction: 2);
 	densCtrl = Select.ar(K2A.ar(sync), [Dust.ar(dens), Impulse.ar(dens)]);
+	densCtrl = PulseDivider.ar(densCtrl, playGroups);  // every Nth grain only
 
-	// ---- Play groups: thin triggers (PD: counter-based, every Nth grain fires) ----
-	densCtrl = PulseDivider.ar(densCtrl, playGroups);
+	// ============================================================
+	// 3. PITCH CHAIN
+	// (octave transposition → random detune → freq mod → rate rand → reverse)
+	// ============================================================
 
-	// ---- Grain duration with random variation ----
-	durCtrl = baseDur * LFNoise1.ar(100).exprange(1/durRand.max(0.01), durRand.max(0.01));
-
-	// ---- Octave transposition (PD: counter-based octave groups) ----
-	// Every Nth grain gets octave-shifted; range controlled by randomOctave
-	// LFNoise0 rate = dens/octaveGroups → one new random value per "group"
-	octaveGate = LFNoise0.kr(dens / octaveGroups.max(1));
-	// Map to 0..randomOctave range, round to integer, then 2^n
+	// Octave transposition: LFNoise0 changes at grain-group rate → mapped to 0..randomOctave
+	octaveGate       = LFNoise0.kr(dens / octaveGroups.max(1));
 	octaveMultiplier = 2.pow((octaveGate.range(0, randomOctave)).round);
+	rate             = rate * octaveMultiplier;
 
-	rate = rate * octaveMultiplier;
-
-	// ---- Random detuning (PD: random ÷ 1000, sign randomized) ----
+	// Per-grain micro-detune
 	detuneOffset = LFNoise1.kr(100).bipolar(randDetune / 1000);
-	rate = rate * (1 + detuneOffset);
+	rate         = rate * (1 + detuneOffset);
 
-	// ---- Freq mod LFO (PD: osc~ at freqModFreq, depth × freqModAmt) ----
-	freqMod = SinOsc.kr(freqModFreq) * freqModAmt / 50; // normalized ±1 range
-	rate = rate * (1 + freqMod);
+	// LFO pitch modulation
+	freqMod = SinOsc.kr(freqModFreq) * freqModAmt / 50;  // normalised ±1
+	rate    = rate * (1 + freqMod);
 
-	// ---- Rate randomization ----
-	rateCtrl = rate * LFNoise1.kr(100).exprange(1/rateRand, rateRand);
+	// Rate randomization
+	rateCtrl = rate * LFNoise1.kr(100).exprange(1 / rateRand, rateRand);
 
-	// ---- Reverse grain (PD: toggle flips pitch to −1) ----
+	// Reverse
 	rateCtrl = rateCtrl * Select.kr(reverseGrain, [1, -1]);
 
-	// ---- Panning ----
+	// Grain duration with random variation
+	durCtrl = baseDur * LFNoise1.ar(100).exprange(1 / durRand.max(0.01), durRand.max(0.01));
+
+	// Panning
 	panCtrl = LFNoise1.kr(100).bipolar(panRand);
 
 	// ============================================================
-	// Trajectory-based playhead safety
+	// 4. PLAYHEAD SAFETY (trajectory-based)
 	// ============================================================
-	// Instead of a naive dead zone around the record pointer, we
-	// derive the grain's full read path over its lifetime and test
-	// whether it intersects the moving record pointer in the
-	// circular buffer.
+	// Test whether the grain's full read path intersects the moving
+	// record pointer during the grain's lifetime, then snap away if so.
 	//
-	// Model:
+	// Model (linear):
 	//   grainRead(t) = center - 0.5*durSamp*grainRate + t*grainRate
 	//   recHead(t)   = recPos + t*recSpeedSamp
-	//   d(t)         = grainRead(t) - recHead(t)
-	//                = d0 + t*relSpeed        (linear in t)
-	// where d0 = center - 0.5*durSamp*grainRate - recPos
-	//       relSpeed = grainRate - recSpeedSamp
-	//
-	// The grain is unsafe iff d(t) ≡ 0 (mod bufFrames) for any
-	// t in [0, durSamp], i.e. any integer multiple of bufFrames
-	// falls within [min(d0,dEnd)-margin, max(d0,dEnd)+margin].
+	//   d(t)         = d0 + t*relSpeed
+	// Unsafe iff any integer k satisfies dMin-margin ≤ k*bufFrames ≤ dMax+margin.
 	// ============================================================
 
-	bufFrames = BufFrames.ir(buf);
+	bufFrames        = BufFrames.ir(buf);
 	safeMarginSamples = safeMargin * SampleRate.ir;
 
-	// Record pointer position (buffer frames, audio rate)
-	ptr = In.ar(ptrBus, 1);
-
-	// Record pointer speed (buffer frames per output sample)
+	ptr          = In.ar(ptrBus, 1);
 	recSpeedSamp = BufRateScale.kr(buf) * ptrSpeed;
+	grainRate    = rateCtrl;
+	durSamp      = durCtrl * SampleRate.ir;
 
-	// Final grain rate (buffer frames per output sample, after all modulation)
-	grainRate = rateCtrl;
+	ptrRand      = LFNoise1.ar(100).bipolar(ptrRandSamples);
+	desiredDelay = (ptrSampleDelay + ptrRand).max(minPtrDelay);
 
-	// Grain duration in output samples
-	durSamp = durCtrl * SampleRate.ir;
-
-	// Desired delay with jitter (samples)
-	ptrRand = LFNoise1.ar(100).bipolar(ptrRandSamples);
-	desiredDelay = (ptrSampleDelay - ptrRand).max(minPtrDelay);
-
-	// Candidate center in buffer frames (wrapped to buffer range)
 	candidateCenter = (ptr - desiredDelay).wrap(0, bufFrames);
 
-	// --- Distance trajectory ---
-	// d(t) = grainRead(t) - recHead(t) = d0 + t * relSpeed
 	d0       = candidateCenter - (0.5 * durSamp * grainRate) - ptr;
 	relSpeed = grainRate - recSpeedSamp;
 	dEnd     = d0 + (durSamp * relSpeed);
+	dMin     = d0.min(dEnd);
+	dMax     = d0.max(dEnd);
 
-	dMin = d0.min(dEnd);
-	dMax = d0.max(dEnd);
+	// Intersection test
+	aCheck   = dMin - safeMarginSamples;
+	bCheck   = dMax + safeMarginSamples;
+	kLow     = (aCheck / bufFrames).ceil;
+	kHigh    = (bCheck / bufFrames).floor;
+	isUnsafe = kHigh >= kLow;
 
-	// --- Intersection test ---
-	// Unsafe if any integer k satisfies  dMin-margin <= k*bufFrames <= dMax+margin
-	aCheck = dMin - safeMarginSamples;
-	bCheck = dMax + safeMarginSamples;
-	kLow   = (aCheck / bufFrames).ceil;
-	kHigh  = (bCheck / bufFrames).floor;
-	isUnsafe = kHigh >= kLow;  // 1.0 if unsafe, 0.0 if safe
-
-	// --- Snap to nearest safe center ---
-	// Primary problematic k (closest to midpoint of d-range)
+	// Snap: shift center by the smaller of forward/backward escape distances
 	kPrimary = ((d0 + dEnd) * 0.5 / bufFrames).round;
+	snapFwd  = (kPrimary * bufFrames) + safeMarginSamples - dMin;
+	snapBwd  = (kPrimary * bufFrames) - safeMarginSamples - dMax;
+	snapDelta = Select.ar(snapFwd.abs <= snapBwd.abs, [snapBwd, snapFwd]);
 
-	// Shift options to escape the unsafe zone around k*bufFrames:
-	//   Forward:  move center so dMin rises above k*bufFrames + margin
-	//   Backward: move center so dMax drops below k*bufFrames - margin
-	snapFwd = (kPrimary * bufFrames) + safeMarginSamples - dMin;
-	snapBwd = (kPrimary * bufFrames) - safeMarginSamples - dMax;
-
-	// Pick the smaller-magnitude snap to preserve user's delay/jitter
-	snapDelta = Select.ar(
-		(snapFwd.abs <= snapBwd.abs),
-		[snapBwd, snapFwd]
-	);
-
-	// If the grain's d-range spans the entire buffer, no position is
-	// fully safe.  Fall back to half-buffer offset from the record head.
-	dSpan = (durSamp * relSpeed).abs;
+	// Fallback: if grain spans the whole buffer, place at opposite side
+	dSpan            = (durSamp * relSpeed).abs;
 	spanExceedsBuffer = (dSpan + (2 * safeMarginSamples)) > bufFrames;
-	fallbackCenter = (ptr - (bufFrames * 0.5)).wrap(0, bufFrames);
+	fallbackCenter   = (ptr - (bufFrames * 0.5)).wrap(0, bufFrames);
 
-	// Chain: candidate → snap if unsafe → fallback if span exceeds buffer
-	safeCenter = Select.ar(
-		isUnsafe,
-		[candidateCenter, (candidateCenter + snapDelta).wrap(0, bufFrames)]
-	);
-	safeCenter = Select.ar(
-		spanExceedsBuffer,
-		[safeCenter, fallbackCenter]
-	);
+	safeCenter = Select.ar(isUnsafe,         [candidateCenter, (candidateCenter + snapDelta).wrap(0, bufFrames)]);
+	safeCenter = Select.ar(spanExceedsBuffer, [safeCenter,      fallbackCenter]);
 
-	// Convert to seconds for TGrains centerPos
 	posSec = safeCenter / bufFrames * BufDur.ir(buf);
 
-	// ---- Fixed position mode (PD: spigot gates between phasor and static slider) ----
+	// Fixed position mode: override phasor-derived position with a static value
 	posSec = Select.ar(K2A.ar(fixedPos), [posSec, DC.ar(fixedPosSec)]);
 
-	// ---- TGrains ----
+	// ============================================================
+	// 5. GRAIN SYNTHESIS
+	// ============================================================
+
 	sig = TGrains.ar(
 		numChannels: 2,
-		trigger: densCtrl,
-		bufnum: buf,
-		rate: rateCtrl,
-		centerPos: posSec,
-		dur: durCtrl,
-		pan: panCtrl,
-		amp: 1,
-		interp: 4,
+		trigger:     densCtrl,
+		bufnum:      buf,
+		rate:        rateCtrl,
+		centerPos:   posSec,
+		dur:         durCtrl,
+		pan:         panCtrl,
+		amp:         1,
+		interp:      4,
 	);
 
 	sig = sig * env * amp;
 
-	// ---- Bit crusher → tanh soft-clip (both driven by bitDepth knob) ----
-	// bitDepth 0.05–1.05 → 2–16 bit quantization
-	// step size = 1 / (2^(bitDepth*14+2) - 1)
+	// ============================================================
+	// 6. EFFECTS CHAIN (bit crusher → tanh soft-clip → LPF)
+	// ============================================================
+
+	// Bit crusher: bitDepth 0.05–1.05 → 2–16 bit quantization
 	bitStepSize = 1 / ((2.pow((bitDepth * 14 + 2).round)) - 1);
-	bitCrushed = (sig / bitStepSize).round * bitStepSize * bitVol;
-	// tanh soft-clip applied after bitcrush: smooths quantization edges
-	// drive=1 at bitDepth just below 1.0 (Select.ar handles fully clean above) → drive=30 at max crush
-	tanhDrive = K2A.ar(bitDepth.linlin(0.05, 1.05, 100, 1));
+	bitCrushed  = (sig / bitStepSize).round * bitStepSize * bitVol;
+
+	// Tanh soft-clip smooths quantization edges; drive scales with crush amount
+	tanhDrive  = K2A.ar(bitDepth.linlin(0.05, 1.05, 100, 1));
 	bitCrushed = tanh(bitCrushed * tanhDrive) / tanhDrive;
-	// Crossfade: when bitDepth >= 1.0 use clean signal, otherwise crushed+distorted
+
+	// Crossfade: bypass crusher when bitDepth >= 1.0 (fully clean)
 	sig = Select.ar(K2A.ar(bitDepth >= 1.0), [bitCrushed, sig]);
 
-	// ---- Filter (independent from bitDepth) ----
+	// Low-pass filter (independent of bit crusher)
 	sig = LPF.ar(sig, freq: filterFreq);
+
 	Out.ar(out, sig);
 }).add;
 "SynthDefs for mic, ptr, rec, and gran added to server.".postln;

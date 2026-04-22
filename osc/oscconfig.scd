@@ -101,6 +101,17 @@ OSCdef('/grain/density', { |msg|
 	~touchOSC.sendMsg('/grain/density-label', densHz.round(0.1).asString ++ " Hz");
 }, "/grain/density");
 
+// ---- Buffer length fader: directly reallocate buffer ----
+// Overrides the generic fader handler so allocation happens immediately on fader move.
+// Range: 0–1 → 0.1–8 seconds.
+OSCdef('/grain/bufferLen', { |msg|
+	var val = msg[1].clip(0.0, 1.0);
+	var durSec = val.linlin(0.0, 1.0, 0.1, 8.0);
+	~ccBuses.setAt(~busNames[\bufferLen].index, val);
+	~sendToTouchOSC.('/grain/bufferLen', val);
+	~allocBuffer !? { ~allocBuffer.(durSec) };
+}, "/grain/bufferLen");
+
 // ---- Toggle OSCdefs ----
 // TouchOSC sends 1.0 on tap; SC flips internal state and sends new state back.
 
@@ -205,7 +216,6 @@ OSCdef('/grain/stopAudio', { |msg|
 	if (msg[1] >= 1.0) {
 		"Stopping all audio...".postln;
 		~speedUpdater.stop;
-		~bufLenUpdater.stop;
 		s.freeAll;
 	};
 }, "/grain/stopAudio");
