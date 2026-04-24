@@ -165,6 +165,25 @@ OSCdef('/grain/fftFreeze', { |msg|
 
 // ---- Momentary OSCdefs ----
 
+// ---- MultiXY: 5 independent touch voices ----
+// TouchOSC MultiXY sends /grain/xy/N with [x, y] for touch slot N (1–5).
+// X (0–1) = position in buffer; Y (0–1) = grain duration (5ms–500ms).
+// 200ms inactivity timeout triggers voice release (handles finger-lift).
+5.do { |i|
+	var idx = i;
+	var addr = "/grain/xy/" ++ (idx + 1);
+	OSCdef(addr.asSymbol, { |msg|
+		var x = msg[1].clip(0.0, 1.0);
+		var y = msg[2].clip(0.0, 1.0);
+		~xyTimeouts[idx] !? { ~xyTimeouts[idx].stop; ~xyTimeouts[idx] = nil };
+		~xyTimeouts[idx] = Task({
+			0.2.wait;
+			~releaseXYVoice.(idx);
+		}).play(AppClock);
+		~spawnXYVoice.(idx, x, y);
+	}, addr);
+};
+
 // ---- Master volume: override generic fader to drive synth arg directly ----
 OSCdef('/master/volume', { |msg|
 	~setMasterVol.(msg[1]);
@@ -216,6 +235,7 @@ OSCdef('/grain/stopAudio', { |msg|
 	if (msg[1] >= 1.0) {
 		"Stopping all audio...".postln;
 		~speedUpdater.stop;
+		5.do { |i| ~releaseXYVoice.(i) };
 		s.freeAll;
 	};
 }, "/grain/stopAudio");

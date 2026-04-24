@@ -115,6 +115,11 @@ s.waitForBoot{
 	~fftFreezeState = false;
 	~currentRate = 1.0;
 
+	// ---- MultiXY voice state (5 touch slots) ----
+	~xyVoices   = Array.newClear(5);
+	~xyTimeouts = Array.newClear(5);
+	~xyActive   = 0;
+
 	// ---- Buffer management functions ----
 
 	// Load a sample file (opens dialog if no path given)
@@ -171,6 +176,47 @@ s.waitForBoot{
 		~liveMode = false;
 		~rec.set(\recGate, 0);
 		("Live mode OFF").postln;
+	};
+
+	// ---- MultiXY voice management ----
+	// X (0–1) → sample position in buffer; Y (0–1) → grain duration (5ms–500ms)
+	// Each of the 5 touch slots spawns/updates an independent \gran synth.
+	// A 200ms inactivity timeout triggers a 150ms release fade when the finger lifts.
+	~spawnXYVoice = { |idx, x, y|
+		var posSec = x * ~bufferDurSec;
+		var durSec = y.clip(0.001, 1).linexp(0.001, 1, 0.005, 0.5);
+		if (~xyVoices[idx].isNil) {
+			~xyVoices[idx] = Synth(\gran, [
+				\ccBus,       ~ccBuses,
+				\amp,         1.0,
+				\buf,         b,
+				\out,         ~fftInBus,
+				\atk,         0.01,
+				\rel,         0.15,
+				\gate,        1,
+				\sync,        1,
+				\fixedPos,    1,
+				\fixedPosSec, posSec,
+				\baseDur,     durSec,
+				\ptrBus,      ~ptrBus,
+				\minPtrDelay, 1000,
+				\safeMargin,  0.02,
+			], ~granGrp);
+			~xyActive = ~xyActive + 1;
+			if (~xyActive == 1) { ~g !? { ~g.set(\amp, 0) } };
+		} {
+			~xyVoices[idx].set(\fixedPosSec, posSec, \baseDur, durSec);
+		};
+	};
+
+	~releaseXYVoice = { |idx|
+		~xyTimeouts[idx] !? { ~xyTimeouts[idx].stop; ~xyTimeouts[idx] = nil };
+		if (~xyVoices[idx].notNil) {
+			~xyVoices[idx].set(\gate, 0);
+			~xyVoices[idx] = nil;
+			~xyActive = (~xyActive - 1).max(0);
+			if (~xyActive == 0) { ~g !? { ~g.set(\amp, 1.0) } };
+		};
 	};
 
 	// ---- CC 55: Playback Speed → update \ptr speed in real time ----
