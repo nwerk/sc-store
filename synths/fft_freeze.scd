@@ -45,8 +45,10 @@ SynthDef.new(\fftFreeze, {
 
 	// L: phase substitution (frozen mags + grain phases) → spectral division
 	//    bins that are loud in the grain get attenuated in the frozen spectrum (inverse vocoder)
+	//    zeroed=0.1 protects quiet bins from exploding; PV_MagClip hard-caps any remaining blow-up
 	PV_CopyPhase(micChain, granChainL);
-	PV_MagDiv(micChain, granCopyL, 0.001);
+	PV_MagDiv(micChain, granCopyL, 0.1);
+	PV_MagClip(micChain, 1.0);
 
 	// R: smear frozen bins (amount scales with morphAmt) → inject grain phases
 	//    produces a diffuse, pitch-smeared spectral blur driven by grain movement
