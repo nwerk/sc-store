@@ -143,7 +143,7 @@ s.waitForBoot{
 
 	// Allocate a new buffer with given duration in seconds
 	~allocBuffer = { |durSec|
-		var wasRecording = ~recState;
+		var wasRecording = ~recState, wasLiveMode = ~liveMode;
 		durSec = durSec ? ~bufferDurSec;
 		~bufferDurSec = durSec;
 		// Stop recording while swapping the buffer to prevent writes to freed memory
@@ -153,8 +153,8 @@ s.waitForBoot{
 			~ptr.set(\buf, buf);
 			~rec.set(\buf, buf);
 			~g.set(\buf, buf);
-			// Restore recording state if it was active before
-			if (wasRecording) { ~rec.set(\recGate, 1) };
+			// Restore recording/live-mode state if either was active before
+			if (wasRecording || wasLiveMode) { ~rec.set(\recGate, 1) };
 			("Buffer allocated: " ++ durSec ++ "s (" ++ buf.numFrames ++ " frames)").postln;
 			~sendToTouchOSC !? { ~sendToTouchOSC.('/status/bufferLen', durSec.asFloat) };
 		});
