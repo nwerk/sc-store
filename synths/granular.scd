@@ -92,12 +92,13 @@ SynthDef.new(\gran, {
 	bitVol=1,          // 0–1: bit crusher output volume
 	freqModAmt=0,      // 0–50: LFO depth on pitch
 	freqModFreq=0,     // 0–5 Hz: LFO rate on pitch
-	playGroups=1,      // 1–50: every Nth grain fires
 	fixedPos=0,        // 0/1: lock grains to a fixed buffer position
 	fixedPosSec=0,     // seconds: fixed position in buffer
 	randDetune=0,      // 0–100: random per-grain micro-detune
 	randomOctave=1,    // 1–4: range of random octave transposition
-	octaveGroups=1     // 1–50: every Nth grain gets octave-shifted
+	octaveGroups=1,    // 1–50: every Nth grain gets octave-shifted
+	fixedPosRand=0,    // 0–1: per-grain scatter radius around fixedPosSec (fraction of buffer duration)
+	xyMode=0           // 0: normal CC-bus mode; 1: XY voice mode (bypasses 4 CC reads, overrides candidateCenter)
 	|
 
 	var ccVals;
@@ -126,8 +127,11 @@ SynthDef.new(\gran, {
 	// CC 17: density — squared taper → sparse grains at low end
 	dens         = Select.kr(~busNames[\density].index, ccVals).squared.linlin(0, 1, 0.001, 1);
 	dens         = 1.0 / (dens * 0.8).max(0.005);            // 0–800ms interval → Hz
-	// CC 21: grain duration (0–1000ms)
-	baseDur      = Select.kr(~busNames[\baseDur].index, ccVals).linlin(0, 1, 0.01, 1.0);
+	// CC 21: grain duration (0–1000ms) — bypassed in XY mode (arg value used directly)
+	baseDur      = Select.kr(xyMode, [
+		Select.kr(~busNames[\baseDur].index, ccVals).linlin(0, 1, 0.01, 1.0),
+		baseDur
+	]);
 
 	// -- Pitch --
 	// CC 20: grain pitch
@@ -138,29 +142,36 @@ SynthDef.new(\gran, {
 	randomOctave = (Select.kr(~busNames[\randomOctave].index, ccVals) * 4).max(0).round;
 	// CC 50: octave groups — every Nth grain gets transposed
 	octaveGroups = (Select.kr(~busNames[\octaveGroups].index, ccVals) * 50).max(1).round;
-	// CC 26: per-grain random detune (÷1000 of rate)
-	randDetune   = Select.kr(~busNames[\randDetune].index, ccVals) * 100;
+	// CC 26: per-grain random detune (÷1000 of rate) — bypassed in XY mode
+	randDetune   = Select.kr(xyMode, [
+		Select.kr(~busNames[\randDetune].index, ccVals) * 100,
+		randDetune
+	]);
 	// CC 58/59: LFO frequency modulation
-	freqModAmt   = Select.kr(~busNames[\freqModAmt].index, ccVals) * 50;
+	freqModAmt   = Select.kr(~busNames[\freqModAmt].index, ccVals) * 5;
 	freqModFreq  = Select.kr(~busNames[\freqModFreq].index, ccVals) * 5;
 
 	// -- Playhead --
-	// CC 22: jitter — ±displacement around the base delay (PD: ÷127 × 3000 samples)
-	ptrRandSamples  = Select.kr(~busNames[\jitter].index, ccVals) * (3 * SampleRate.ir);
+	// CC 22: jitter — bypassed in XY mode (ptrRandSamples arg used directly; LiveMode ON: y*1.5s)
+	ptrRandSamples  = Select.kr(xyMode, [
+		Select.kr(~busNames[\jitter].index, ccVals) * (3 * SampleRate.ir),
+		ptrRandSamples
+	]);
 	// CC 24: base delay behind the record pointer (PD: ÷127 × 300 ms)
 	ptrSampleDelay  = Select.kr(~busNames[\playheadRand].index, ccVals) * (3 * SampleRate.ir) + minPtrDelay;
 
 	// -- Effects --
-	// CC 54: bit depth — inverted so 0=clean, 1=crushed
-	bitDepth     = (1 - Select.kr(~busNames[\bitDepth].index, ccVals)) + 0.05;
+	// CC 54: bit depth — bypassed in XY mode (arg value used directly; 1.05=clean, 0.1=heavy)
+	bitDepth     = Select.kr(xyMode, [
+		(1 - Select.kr(~busNames[\bitDepth].index, ccVals)) + 0.05,
+		bitDepth
+	]);
 	// CC 61: filter cutoff — inverted exponential (0=open, 1=closed)
 	filterFreq   = (1 - Select.kr(~busNames[\filterFreq].index, ccVals)).linexp(0.0001, 1, 20, 20000);
 
 	// -- Spatial / Grouping --
 	// CC 60: stereo panning spread
 	panRand      = Select.kr(~busNames[\panRand].index, ccVals);
-	// CC 25: play groups — thin the trigger stream (every Nth grain fires)
-	playGroups   = (Select.kr(~busNames[\playGroups].index, ccVals) * 50).max(1).round;
 
 	// ============================================================
 	// 2. ENVELOPE & TRIGGER
@@ -168,7 +179,6 @@ SynthDef.new(\gran, {
 
 	env      = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction: 2);
 	densCtrl = Select.ar(K2A.ar(sync), [Dust.ar(dens), Impulse.ar(dens)]);
-	densCtrl = PulseDivider.ar(densCtrl, playGroups);  // every Nth grain only
 
 	// ============================================================
 	// 3. PITCH CHAIN
@@ -224,7 +234,12 @@ SynthDef.new(\gran, {
 	ptrRand      = LFNoise1.ar(100).bipolar(ptrRandSamples);
 	desiredDelay = (ptrSampleDelay + ptrRand).max(minPtrDelay);
 
-	candidateCenter = (ptr - desiredDelay).wrap(0, bufFrames);
+	// XY mode: inject fixedPosSec (frames) + ptrRand jitter as candidate; safety still runs.
+	// LiveMode OFF (fixedPos=1) discards safeCenter anyway — this path is harmless there.
+	candidateCenter = Select.ar(K2A.ar(xyMode), [
+		(ptr - desiredDelay).wrap(0, bufFrames),
+		(fixedPosSec * SampleRate.ir + ptrRand).wrap(0, bufFrames)
+	]);
 
 	d0       = candidateCenter - (0.5 * durSamp * grainRate) - ptr;
 	relSpeed = grainRate - recSpeedSamp;
@@ -255,8 +270,11 @@ SynthDef.new(\gran, {
 
 	posSec = safeCenter / bufFrames * BufDur.ir(buf);
 
-	// Fixed position mode: override phasor-derived position with a static value
-	posSec = Select.ar(K2A.ar(fixedPos), [posSec, DC.ar(fixedPosSec)]);
+	// Fixed position mode: override phasor-derived position with per-grain scatter around fixedPosSec.
+	// fixedPosRand (0–1): scatter radius as a fraction of buffer duration; 0 = locked position.
+	posSec = Select.ar(K2A.ar(fixedPos), [posSec,
+		(fixedPosSec + (LFNoise1.ar(100) * fixedPosRand * BufDur.ir(buf))).clip(0, BufDur.ir(buf))
+	]);
 
 	// ============================================================
 	// 5. GRAIN SYNTHESIS

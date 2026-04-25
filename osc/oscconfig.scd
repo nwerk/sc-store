@@ -65,6 +65,7 @@
 	~sendToTouchOSC.('/grain/reverse',   ~reverseState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fixedPos',  ~fixedPosState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/xyMode',    ~xyMode.asInteger.asFloat);
 
 	// Status
 	~sendToTouchOSC.('/status/rate',      ~currentRate.asFloat);
@@ -163,24 +164,42 @@ OSCdef('/grain/fftFreeze', { |msg|
 	};
 }, "/grain/fftFreeze");
 
+OSCdef('/grain/xyMode', { |msg|
+	if (msg[1] >= 1.0) {
+		~xyMode = ~xyMode.not;
+		if (~xyMode) {
+			// Entering XY mode: silence the main granular synth
+			~g !? { ~g.set(\amp, 0) };
+		} {
+			// Leaving XY mode: release all voices and restore main synth
+			5.do { |i| ~releaseXYVoice.(i) };
+			~g !? { ~g.set(\amp, 1.0) };
+		};
+		~sendToTouchOSC.('/grain/xyMode', ~xyMode.asInteger.asFloat);
+		("XY Mode: " ++ if(~xyMode, "ON", "OFF")).postln;
+	};
+}, "/grain/xyMode");
+
 // ---- Momentary OSCdefs ----
 
 // ---- MultiXY: 5 independent touch voices ----
-// TouchOSC MultiXY sends /grain/xy/N with [x, y] for touch slot N (1–5).
-// X (0–1) = position in buffer; Y (0–1) = grain duration (5ms–500ms).
-// 200ms inactivity timeout triggers voice release (handles finger-lift).
+// TouchOSC MK2 MultiXY sends per touch slot N (1–5):
+//   /grain/xy/N  x  y  z   — all bundled; z=1 finger down/moving, z=0 finger lifted.
+// On lift (z=0): immediate release. On touch/move (z=1): spawn or update voice.
+// No timeout — a stationary finger sends no messages but the voice holds until z=0.
+// xyMode toggle calls ~releaseXYVoice on all slots as a cleanup safety net.
 5.do { |i|
 	var idx = i;
 	var addr = "/grain/xy/" ++ (idx + 1);
 	OSCdef(addr.asSymbol, { |msg|
 		var x = msg[1].clip(0.0, 1.0);
 		var y = msg[2].clip(0.0, 1.0);
-		~xyTimeouts[idx] !? { ~xyTimeouts[idx].stop; ~xyTimeouts[idx] = nil };
-		~xyTimeouts[idx] = Task({
-			0.2.wait;
+		var z = if (msg.size >= 4) { msg[3] } { 1.0 };
+		if (z <= 0) {
 			~releaseXYVoice.(idx);
-		}).play(AppClock);
-		~spawnXYVoice.(idx, x, y);
+		} {
+			~spawnXYVoice.(idx, x, y);
+		};
 	}, addr);
 };
 

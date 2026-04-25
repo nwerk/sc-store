@@ -102,6 +102,12 @@ if (File.exists(~presetDir).not) {
 		~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
 		~g.set(\rate, ~currentRate);
 
+		// Reallocate buffer to match the stored length
+		// (must be after toggle states so ~recState/~liveMode are already restored)
+		~allocBuffer.(
+			(data[\faders][~busNames[\bufferLen].index] ? 0.5).linlin(0.0, 1.0, 0.1, 8.0)
+		);
+
 		~activePreset = index;
 		("Preset " ++ index ++ " loaded.").postln;
 

@@ -72,13 +72,12 @@ s.waitForBoot{
 		\bitVol, 1,
 		\freqModAmt, 0,
 		\freqModFreq, 0,
-		\playGroups, 1,
 		\fixedPos, 0,
 		\fixedPosSec, 0,
 		\randDetune, 0,
 		\randomOctave, 1,
 		\octaveGroups, 1,
-    ], ~granGrp);
+	], ~granGrp);
 
 	~fftFx = Synth(\fftFreeze, [
 		\micIn, ~micBus,
@@ -114,11 +113,11 @@ s.waitForBoot{
 	~fixedPosState = false;
 	~fftFreezeState = false;
 	~currentRate = 1.0;
+	~xyMode = false;
 
 	// ---- MultiXY voice state (5 touch slots) ----
 	~xyVoices   = Array.newClear(5);
 	~xyTimeouts = Array.newClear(5);
-	~xyActive   = 0;
 
 	// ---- Buffer management functions ----
 
@@ -161,7 +160,7 @@ s.waitForBoot{
 			// Restore recording/live-mode state if either was active before
 			if (wasRecording || wasLiveMode) { ~rec.set(\recGate, 1) };
 			("Buffer allocated: " ++ durSec ++ "s (" ++ buf.numFrames ++ " frames)").postln;
-			~sendToTouchOSC !? { ~sendToTouchOSC.('/status/bufferLen', durSec.asFloat) };
+			~sendToTouchOSC !? { ~sendToTouchOSC.('/grain/bufferLen', durSec.asFloat) };
 		});
 	};
 
@@ -179,14 +178,19 @@ s.waitForBoot{
 	};
 
 	// ---- MultiXY voice management ----
-	// X (0–1) → sample position in buffer; Y (0–1) → grain duration (5ms–500ms)
+	// X (0–1) → buffer position (seconds). Y (0–1) → duration / detune / jitter / distortion.
+	// LiveMode ON:  fixedPos=0, xyMode=1 — X injected into candidateCenter, safety mechanism runs.
+	// LiveMode OFF: fixedPos=1, xyMode=1 — exact position, safety bypassed; scatter via fixedPosRand.
 	// Each of the 5 touch slots spawns/updates an independent \gran synth.
 	// A 200ms inactivity timeout triggers a 150ms release fade when the finger lifts.
+	// ~g is muted while any XY voice is active and restored when all fingers are lifted.
 	~spawnXYVoice = { |idx, x, y|
-		var posSec = x * ~bufferDurSec;
-		var durSec = y.clip(0.001, 1).linexp(0.001, 1, 0.005, 0.5);
-		if (~xyVoices[idx].isNil) {
-			~xyVoices[idx] = Synth(\gran, [
+		var posSec     = x * ~bufferDurSec;
+		var dur        = y.linlin(0, 1, 0.01, 1.5);
+		var detune     = y.linlin(0, 1, 0, 30);
+		var distortion = y.linlin(0, 1, 1.05, 0.7);
+		if (~xyMode) {
+			var commonArgs = [
 				\ccBus,       ~ccBuses,
 				\amp,         1.0,
 				\buf,         b,
@@ -195,17 +199,50 @@ s.waitForBoot{
 				\rel,         0.15,
 				\gate,        1,
 				\sync,        1,
-				\fixedPos,    1,
+				\xyMode,      1,
 				\fixedPosSec, posSec,
-				\baseDur,     durSec,
-				\ptrBus,      ~ptrBus,
-				\minPtrDelay, 1000,
-				\safeMargin,  0.02,
-			], ~granGrp);
-			~xyActive = ~xyActive + 1;
-			if (~xyActive == 1) { ~g !? { ~g.set(\amp, 0) } };
-		} {
-			~xyVoices[idx].set(\fixedPosSec, posSec, \baseDur, durSec);
+				\minPtrDelay, 0,
+				\baseDur,     dur,
+				\randDetune,  detune,
+				\bitDepth,    distortion,
+			];
+			if (~xyVoices[idx].isNil) {
+				~xyVoices[idx] = if (~liveMode) {
+					// LiveMode ON: X injected into candidateCenter; safety snaps if near write head
+					Synth(\gran, commonArgs ++ [
+						\fixedPos,       0,
+						\fixedPosRand,   0,
+						\ptrRandSamples, y * 1.5 * s.sampleRate,
+						\safeMargin,     0.02,
+					], ~granGrp)
+				} {
+					// LiveMode OFF: buffer static, exact position; scatter via fixedPosRand
+					Synth(\gran, commonArgs ++ [
+						\fixedPos,       1,
+						\fixedPosRand,   y * 0.2,
+						\ptrRandSamples, 0,
+						\safeMargin,     0.0,
+					], ~granGrp)
+				};
+			} {
+				if (~liveMode) {
+					~xyVoices[idx].set(
+						\fixedPosSec,    posSec,
+						\baseDur,        dur,
+						\randDetune,     detune,
+						\bitDepth,       distortion,
+						\ptrRandSamples, y * 1.5 * s.sampleRate,
+					);
+				} {
+					~xyVoices[idx].set(
+						\fixedPosSec,  posSec,
+						\baseDur,      dur,
+						\randDetune,   detune,
+						\bitDepth,     distortion,
+						\fixedPosRand, y * 0.2,
+					);
+				};
+			};
 		};
 	};
 
@@ -214,8 +251,6 @@ s.waitForBoot{
 		if (~xyVoices[idx].notNil) {
 			~xyVoices[idx].set(\gate, 0);
 			~xyVoices[idx] = nil;
-			~xyActive = (~xyActive - 1).max(0);
-			if (~xyActive == 0) { ~g !? { ~g.set(\amp, 1.0) } };
 		};
 	};
 
@@ -239,15 +274,23 @@ s.waitForBoot{
 	thisProcess.interpreter.executeFile(~basePath ++ "osc/presets.scd");
 
 	// ---- Send full state to TouchOSC on boot ----
-	// (short delay so synths are fully ready)
+	// First pass at 0.5s (synths ready); second pass at 3.0s in case TouchOSC
+	// wasn't fully connected yet and missed the first burst of OSC messages.
 	AppClock.sched(0.5, {
-		// Load preset 0 on startup if it exists, otherwise just sync state
 		if (~presetExists.(0)) {
 			~loadPreset.(0);
 		} {
 			~sendAllState.();
 		};
-		nil; // don't reschedule
+		nil;
+	});
+	AppClock.sched(3.0, {
+		if (~presetExists.(0)) {
+			~loadPreset.(0);
+		} {
+			~sendAllState.();
+		};
+		nil;
 	});
 
 	"Synth \\gran created with TouchOSC + OSC control!".postln;

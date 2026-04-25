@@ -38,7 +38,6 @@
 	jitter:   ( index:22 ),
 	param23:  ( index:23 ),
 	playheadRand: ( index:24 ),
-	playGroups:   ( index:25 ),
 	randDetune:   ( index:26 ),
 	param27:  ( index:27 ),
 	param28:  ( index:28 ),
@@ -163,7 +162,6 @@
 	// ---- Faders (Page 3: Modulation & FX) ----
 	'/grain/randomOctave':( busIndex: 18, type: \fader, label: "Random Octave" ),
 	'/grain/octaveGroups':( busIndex: 50, type: \fader, label: "Octave Groups" ),
-	'/grain/playGroups':  ( busIndex: 25, type: \fader, label: "Play Groups" ),
 	'/grain/randDetune':  ( busIndex: 26, type: \fader, label: "Rand Detune" ),
 	'/grain/freqModAmt':  ( busIndex: 58, type: \fader, label: "Freq Mod Amt" ),
 	'/grain/freqModFreq': ( busIndex: 59, type: \fader, label: "Freq Mod Freq" ),

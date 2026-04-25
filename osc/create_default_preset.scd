@@ -21,7 +21,6 @@
 //   busIndex 21  duration      0.2    → ~200ms grain envelope
 //   busIndex 22  jitter        0.0    → no jitter (locked to playhead)
 //   busIndex 24  playheadRand  0.0    → no extra playhead randomization
-//   busIndex 25  playGroups    0.0    → every grain fires (no thinning)
 //   busIndex 26  randDetune    0.0    → no micro-detuning
 //   busIndex 46  feedback      0.0    → no recording feedback
 //   busIndex 50  octaveGroups  0.0    → octave shift applies every grain
@@ -41,7 +40,6 @@ var defaults = Dictionary[
 	21 -> 0.2,
 	22 -> 0.0,
 	24 -> 0.0,
-	25 -> 0.0,
 	26 -> 0.0,
 	46 -> 0.0,
 	50 -> 0.0,

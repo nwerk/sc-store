@@ -23,7 +23,6 @@
     jitter:   ( index:22 ), // CC 22: Jitter (PD: ÷127 × 3000 samples)
     param23:  ( index:23 ), // fader ch2
     playheadRand: ( index:24 ), // CC 24: Playhead Randomize (PD: ÷127 × 300)
-    playGroups:   ( index:25 ), // CC 25: Play Groups (PD: ÷127 × 50)
     randDetune:   ( index:26 ), // CC 26: Rand Detune (PD: ÷127 × 100)
     param27:  ( index:27 ), // fader ch3
     param28:  ( index:28 ),
