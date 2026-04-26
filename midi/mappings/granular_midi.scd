@@ -52,9 +52,9 @@
     param52:  ( index:52 ),
     param53:  ( index:53 ),
     bitDepth: ( index:54 ), // CC 54: Bit Depth (PD: val + 0.05)
-    playbackSpeed: ( index:55 ), // CC 55: Playback Speed (PD: ÷127 × 3 + 0.0625)
-    param56:  ( index:56 ),
-    param57:  ( index:57 ),
+    param55:       ( index:55 ),
+    speedModRate:  ( index:56 ), // CC 56: Speed Modulation Rate (Dust Hz)
+    speedModDepth: ( index:57 ), // CC 57: Speed Modulation Depth (0–1)
     freqModAmt:  ( index:58 ), // CC 58: Freq Mod Amount (PD: ÷127 × 50)
     freqModFreq: ( index:59 ), // CC 59: Freq Mod Freq (PD: ÷127 × 5 Hz)
     panRand:  ( index:60 ), // CC 60: Panning Amount (PD: 0–1)

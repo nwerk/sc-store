@@ -17,9 +17,9 @@ SynthDef.new(\mic, {
 }).add;
 
 SynthDef.new(\ptr, {
-	arg out=0, buf=0, speed=1;
+	arg out=0, buf=0;
 	var sig;
-	sig = Phasor.ar(0, BufRateScale.kr(buf) * speed, 0, BufFrames.kr(buf));
+	sig = Phasor.ar(0, BufRateScale.kr(buf), 0, BufFrames.kr(buf));
 	Out.ar(out, sig);
 }).add;
 
@@ -110,12 +110,17 @@ SynthDef.new(\gran, {
 	var bitStepSize, bitCrushed, tanhDrive;
 	var octaveGate;
 	// trajectory-based playhead safety
-	var ptrSpeed, recSpeedSamp, grainRate, durSamp;
+	var recSpeedSamp, grainRate, durSamp;
 	var desiredDelay, candidateCenter;
 	var d0, relSpeed, dEnd, dMin, dMax;
 	var aCheck, bCheck, kLow, kHigh, isUnsafe;
 	var kPrimary, snapFwd, snapBwd, snapDelta, safeCenter;
 	var dSpan, spanExceedsBuffer, fallbackCenter;
+	// read-pointer freeze modulation
+	var readModRate, readModDepth, readDropTrig, readDropEnv, readSpeedGate, heldPosSec;
+	// fixed position latch
+	var fixedPosTrig, fixedPosRise, fpHasPressed, fpLatchFrame, fpLatchDelay;
+	var fpResumeFrame, fpFrozenFrame, normalModePosSec, xyFixedPosSec;
 
 	// ============================================================
 	// 1. CC BUS READS
@@ -136,8 +141,6 @@ SynthDef.new(\gran, {
 	// -- Pitch --
 	// CC 20: grain pitch
 	rate         = Select.kr(~busNames[\rate].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
-	// CC 55: playback speed (also drives \ptr; read here for safety calc)
-	ptrSpeed     = Select.kr(~busNames[\playbackSpeed].index, ccVals).linlin(0, 1, 0.0625, 3.0625);
 	// CC 18: random octave range (0–4 semitones)
 	randomOctave = (Select.kr(~busNames[\randomOctave].index, ccVals) * 4).max(0).round;
 	// CC 50: octave groups — every Nth grain gets transposed
@@ -172,6 +175,9 @@ SynthDef.new(\gran, {
 	// -- Spatial / Grouping --
 	// CC 60: stereo panning spread
 	panRand      = Select.kr(~busNames[\panRand].index, ccVals);
+	// CC 56/57: read-pointer freeze modulation
+	readModRate  = Select.kr(~busNames[\speedModRate].index,  ccVals).linlin(0, 1, 0.05, 8.0);
+	readModDepth = Select.kr(~busNames[\speedModDepth].index, ccVals);
 
 	// ============================================================
 	// 2. ENVELOPE & TRIGGER
@@ -227,7 +233,7 @@ SynthDef.new(\gran, {
 	safeMarginSamples = safeMargin * SampleRate.ir;
 
 	ptr          = In.ar(ptrBus, 1);
-	recSpeedSamp = BufRateScale.kr(buf) * ptrSpeed;
+	recSpeedSamp = BufRateScale.kr(buf);
 	grainRate    = rateCtrl;
 	durSamp      = durCtrl * SampleRate.ir;
 
@@ -270,11 +276,43 @@ SynthDef.new(\gran, {
 
 	posSec = safeCenter / bufFrames * BufDur.ir(buf);
 
-	// Fixed position mode: override phasor-derived position with per-grain scatter around fixedPosSec.
-	// fixedPosRand (0–1): scatter radius as a fraction of buffer duration; 0 = locked position.
-	posSec = Select.ar(K2A.ar(fixedPos), [posSec,
+	// ---- Read-pointer sine modulation (CC 56/57) ----
+	// Sine LFO smoothly slows/freezes grain read position each cycle.
+	// Gate = (sin + 2 - depth).clip(0,1): depth=0 → always 1 (bypass); depth=1 → dips to 0.
+	// Latch fires at the downward zero-crossing (phase 0.5) to capture the live position
+	// just as the freeze begins, giving the crossfade a stable reference to blend toward.
+	readDropTrig  = Impulse.kr(readModRate, 0.5);
+	readSpeedGate = K2A.ar((SinOsc.kr(readModRate) + 2 - readModDepth).clip(0, 1));
+	heldPosSec    = Latch.ar(posSec, K2A.ar(readDropTrig));
+	posSec        = (posSec * readSpeedGate) + (heldPosSec * (1 - readSpeedGate));
+
+	// ---- Fixed position: latch heard position on press, resume forward on release ----
+	// Normal mode (xyMode=0):
+	//   fixedPos=1 (press):   grains freeze at the position heard at the moment of press ± scatter
+	//   fixedPos=0 (release): grains continue forward from the latched position (not the live write head)
+	//   fixedPos=0, pre-press: live posSec unchanged
+	// XY mode (xyMode=1): preserves the existing fixedPosSec-arg behaviour unchanged.
+	fixedPosTrig  = K2A.ar(fixedPos);
+	fixedPosRise  = HPZ1.ar(fixedPosTrig) > 0;                          // one-sample rising edge
+	fpHasPressed  = Latch.ar(fixedPosTrig, fixedPosRise);               // stays 1 after first press
+	fpLatchFrame  = Latch.ar(posSec * SampleRate.ir, fixedPosRise);     // heard pos in frames at press
+	fpLatchDelay  = Latch.ar(ptr - (posSec * SampleRate.ir), fixedPosRise); // write-head offset at press
+
+	fpResumeFrame = (ptr - fpLatchDelay).wrap(0, bufFrames);            // moves forward from latch point
+	fpFrozenFrame = (fpLatchFrame + (LFNoise1.ar(100) * fixedPosRand * bufFrames)).clip(0, bufFrames - 1);
+
+	normalModePosSec = Select.ar(fixedPosTrig, [
+		Select.ar(fpHasPressed, [posSec, fpResumeFrame / bufFrames * BufDur.ir(buf)]),  // 0: live or resume
+		fpFrozenFrame / bufFrames * BufDur.ir(buf)                                      // 1: frozen
+	]);
+
+	// XY mode: original fixedPosSec-arg path — XY voices set this from touch X.
+	xyFixedPosSec = Select.ar(fixedPosTrig, [
+		posSec,
 		(fixedPosSec + (LFNoise1.ar(100) * fixedPosRand * BufDur.ir(buf))).clip(0, BufDur.ir(buf))
 	]);
+
+	posSec = Select.ar(K2A.ar(xyMode), [normalModePosSec, xyFixedPosSec]);
 
 	// ============================================================
 	// 5. GRAIN SYNTHESIS

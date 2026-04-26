@@ -67,9 +67,9 @@
 	param52:  ( index:52 ),
 	param53:  ( index:53 ),
 	bitDepth: ( index:54 ),
-	playbackSpeed: ( index:55 ),
-	param56:  ( index:56 ),
-	param57:  ( index:57 ),
+	param55:       ( index:55 ),
+	speedModRate:  ( index:56 ),  // CC 56: Speed Modulation Rate (Dust Hz)
+	speedModDepth: ( index:57 ),  // CC 57: Speed Modulation Depth (0–1)
 	freqModAmt:  ( index:58 ),
 	freqModFreq: ( index:59 ),
 	panRand:  ( index:60 ),
@@ -153,7 +153,8 @@
 	'/grain/density':     ( busIndex: 17, type: \fader, label: "Density" ),
 	'/grain/duration':    ( busIndex: 21, type: \fader, label: "Grain Duration" ),
 	'/grain/pitch':       ( busIndex: 20, type: \fader, label: "Grain Pitch" ),
-	'/grain/speed':       ( busIndex: 55, type: \fader, label: "Playback Speed" ),
+	'/grain/speedModRate': ( busIndex: 56, type: \fader, label: "Speed Mod Rate" ),
+	'/grain/speedModDepth':( busIndex: 57, type: \fader, label: "Speed Mod Depth" ),
 	'/grain/jitter':      ( busIndex: 22, type: \fader, label: "Jitter" ),
 	'/grain/playheadRand':( busIndex: 24, type: \fader, label: "Playhead Rand" ),
 	'/grain/bufferLen':   ( busIndex: 16, type: \fader, label: "Buffer Length" ),

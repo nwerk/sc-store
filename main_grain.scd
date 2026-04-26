@@ -34,7 +34,7 @@ s.waitForBoot{
 
 	// ---- Synth instances ----
     ~mic = Synth(\mic, [\in, 0, \out, ~micBus], ~micGrp);
-    ~ptr = Synth(\ptr, [\out, ~ptrBus, \buf, b, \speed, 1], ~ptrGrp);
+    ~ptr = Synth(\ptr, [\out, ~ptrBus, \buf, b], ~ptrGrp);
     ~rec = Synth(\rec, [
 		\ccBus, ~ccBuses,
 		\ptrIn, ~ptrBus,
@@ -253,18 +253,6 @@ s.waitForBoot{
 			~xyVoices[idx] = nil;
 		};
 	};
-
-	// ---- CC 55: Playback Speed → update \ptr speed in real time ----
-	// (Read CC 55 and route to \ptr synth since ptr doesn't read ccBus itself)
-	~speedUpdater = Routine({
-		inf.do {
-			~ccBuses.getn(55, 1, { |val|
-				var speed = val[0].linlin(0, 1, 0.0625, 3.0625);
-				~ptr.set(\speed, speed);
-			});
-			0.05.wait; // 50ms update rate
-		};
-	}).play(AppClock);
 
 	// ---- CC 16: Buffer Length → handled via OSCdef in oscconfig.scd ----
 	// (direct ~allocBuffer call on fader move; no polling routine needed)
