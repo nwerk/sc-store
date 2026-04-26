@@ -304,7 +304,7 @@ SynthDef.new(\gran, {
 
 	// Tanh soft-clip smooths quantization edges; drive scales with crush amount
 	tanhDrive  = K2A.ar(bitDepth.linlin(0.05, 1.05, 100, 1));
-	bitCrushed = tanh(bitCrushed * tanhDrive) / tanhDrive;
+	bitCrushed = tanh(bitCrushed * tanhDrive) / (tanhDrive * 0.85);
 
 	// Crossfade: bypass crusher when bitDepth >= 1.0 (fully clean)
 	sig = Select.ar(K2A.ar(bitDepth >= 1.0), [bitCrushed, sig]);
