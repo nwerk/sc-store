@@ -168,12 +168,12 @@ OSCdef('/grain/xyMode', { |msg|
 	if (msg[1] >= 1.0) {
 		~xyMode = ~xyMode.not;
 		if (~xyMode) {
-			// Entering XY mode: silence the main granular synth
-			~g !? { ~g.set(\amp, 0) };
+			// Entering XY mode: pause the main granular synth (stops full UGen graph, saves CPU)
+			~g !? { ~g.run(false) };
 		} {
-			// Leaving XY mode: release all voices and restore main synth
+			// Leaving XY mode: release all voices and resume main synth
 			5.do { |i| ~releaseXYVoice.(i) };
-			~g !? { ~g.set(\amp, 1.0) };
+			~g !? { ~g.run(true) };
 		};
 		~sendToTouchOSC.('/grain/xyMode', ~xyMode.asInteger.asFloat);
 		("XY Mode: " ++ if(~xyMode, "ON", "OFF")).postln;

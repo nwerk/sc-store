@@ -98,7 +98,8 @@ SynthDef.new(\gran, {
 	randomOctave=1,    // 1–4: range of random octave transposition
 	octaveGroups=1,    // 1–50: every Nth grain gets octave-shifted
 	fixedPosRand=0,    // 0–1: per-grain scatter radius around fixedPosSec (fraction of buffer duration)
-	xyMode=0           // 0: normal CC-bus mode; 1: XY voice mode (bypasses 4 CC reads, overrides candidateCenter)
+	xyMode=0,          // 0: normal CC-bus mode; 1: XY voice mode (bypasses 4 CC reads, overrides candidateCenter)
+	maxDensHz=20000    // XY mode only: per-voice density ceiling (Hz); set by client proportional to voice count
 	|
 
 	var ccVals;
@@ -132,6 +133,8 @@ SynthDef.new(\gran, {
 	// CC 17: density — squared taper → sparse grains at low end
 	dens         = Select.kr(~busNames[\density].index, ccVals).squared.linlin(0, 1, 0.001, 1);
 	dens         = 1.0 / (dens * 0.8).max(0.005);            // 0–800ms interval → Hz
+	// In XY mode, cap density to per-voice share (client sets maxDensHz proportionally to voice count)
+	dens         = Select.kr(xyMode, [dens, dens.min(maxDensHz)]);
 	// CC 21: grain duration (0–1000ms) — bypassed in XY mode (arg value used directly)
 	baseDur      = Select.kr(xyMode, [
 		Select.kr(~busNames[\baseDur].index, ccVals).linlin(0, 1, 0.01, 1.0),
@@ -342,7 +345,7 @@ SynthDef.new(\gran, {
 
 	// Tanh soft-clip smooths quantization edges; drive scales with crush amount
 	tanhDrive  = K2A.ar(bitDepth.linlin(0.05, 1.05, 100, 1));
-	bitCrushed = tanh(bitCrushed * tanhDrive) / (tanhDrive * 0.85);
+	bitCrushed = tanh(bitCrushed * tanhDrive) / (tanhDrive * 0.7);
 
 	// Crossfade: bypass crusher when bitDepth >= 1.0 (fully clean)
 	sig = Select.ar(K2A.ar(bitDepth >= 1.0), [bitCrushed, sig]);

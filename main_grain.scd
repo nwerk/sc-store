@@ -116,8 +116,17 @@ s.waitForBoot{
 	~xyMode = false;
 
 	// ---- MultiXY voice state (5 touch slots) ----
-	~xyVoices   = Array.newClear(5);
-	~xyTimeouts = Array.newClear(5);
+	~xyVoices      = Array.newClear(5);
+	~xyTimeouts    = Array.newClear(5);
+	~xyMaxGrainsHz = 80; // total grain budget (Hz) shared across all active XY voices — tune as needed
+
+	// Divide ~xyMaxGrainsHz equally among active voices and push the cap to each running synth.
+	// Called after every spawn or release so all voices stay within budget.
+	~updateXYDensCap = {
+		var count = ~xyVoices.select(_.notNil).size.max(1);
+		var capHz = ~xyMaxGrainsHz / count;
+		~xyVoices.do { |v| v !? { v.set(\maxDensHz, capHz) } };
+	};
 
 	// ---- Buffer management functions ----
 
@@ -185,10 +194,13 @@ s.waitForBoot{
 	// A 200ms inactivity timeout triggers a 150ms release fade when the finger lifts.
 	// ~g is muted while any XY voice is active and restored when all fingers are lifted.
 	~spawnXYVoice = { |idx, x, y|
-		var posSec     = x * ~bufferDurSec;
-		var dur        = y.linlin(0, 1, 0.01, 1.5);
-		var detune     = y.linlin(0, 1, 0, 30);
-		var distortion = y.linlin(0, 1, 1.05, 0.7);
+		var posSec      = x * ~bufferDurSec;
+		var dur         = y.linlin(0, 1, 0.01, 1.5);
+		var detune      = y.linlin(0, 1, 0, 30);
+		var distortion  = y.linlin(0, 1, 1.05, 0.7);
+		// Cap for the new voice: budget ÷ (current count + 1 for the incoming voice)
+		var pendingCount = (~xyVoices.select(_.notNil).size + 1).max(1);
+		var spawnCap     = ~xyMaxGrainsHz / pendingCount;
 		if (~xyMode) {
 			var commonArgs = [
 				\ccBus,       ~ccBuses,
@@ -205,6 +217,7 @@ s.waitForBoot{
 				\baseDur,     dur,
 				\randDetune,  detune,
 				\bitDepth,    distortion,
+				\maxDensHz,   spawnCap,
 			];
 			if (~xyVoices[idx].isNil) {
 				~xyVoices[idx] = if (~liveMode) {
@@ -243,6 +256,7 @@ s.waitForBoot{
 					);
 				};
 			};
+			~updateXYDensCap.(); // push new lower cap to all existing voices
 		};
 	};
 
@@ -251,6 +265,7 @@ s.waitForBoot{
 		if (~xyVoices[idx].notNil) {
 			~xyVoices[idx].set(\gate, 0);
 			~xyVoices[idx] = nil;
+			~updateXYDensCap.(); // raise cap for remaining voices
 		};
 	};
 
