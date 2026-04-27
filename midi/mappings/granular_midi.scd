@@ -59,7 +59,7 @@
     freqModFreq: ( index:59 ), // CC 59: Freq Mod Freq (PD: ÷127 × 5 Hz)
     panRand:  ( index:60 ), // CC 60: Panning Amount (PD: 0–1)
     param61:  ( index:61 ),
-    masterVol:( index:62 ), // CC 62: Master Volume (PD: 0–1)
+    timeStretch:( index:62 ), // CC 62: Time Stretch (0.25–4.0×, center=1.0)
     param63:  ( index:63 ),
     param64:  ( index:64 ),
     param65:  ( index:65 ),

@@ -74,7 +74,7 @@
 	freqModFreq: ( index:59 ),
 	panRand:  ( index:60 ),
 	filterFreq: ( index:61 ),
-	param62: ( index:62 ),
+	timeStretch: ( index:62 ),  // CC 62: Time Stretch (0.25–4.0×, center=1.0)
 	param63:  ( index:63 ),
 	fftFilter: ( index:64 ),
 	fftMorph:  ( index:65 ),
@@ -159,6 +159,7 @@
 	'/grain/playheadRand':( busIndex: 24, type: \fader, label: "Playhead Rand" ),
 	'/grain/bufferLen':   ( busIndex: 16, type: \fader, label: "Buffer Length" ),
 	'/grain/feedback':    ( busIndex: 46, type: \fader, label: "Feedback" ),
+	'/grain/timeStretch': ( busIndex: 62, type: \fader, label: "Time Stretch" ),
 
 	// ---- Faders (Page 3: Modulation & FX) ----
 	'/grain/randomOctave':( busIndex: 18, type: \fader, label: "Random Octave" ),
@@ -182,6 +183,7 @@
 	'/grain/reverse':     ( type: \toggle, label: "Reverse" ),
 	'/grain/fixedPos':    ( type: \toggle, label: "Fixed Position" ),
 	'/grain/fftFreeze':   ( type: \toggle, label: "FFT Freeze" ),
+	'/grain/densFromDur': ( type: \toggle, label: "Density from Duration" ),
 
 	// ---- Momentary (Page 4) ----
 	'/grain/octaveDown':  ( type: \momentary, label: "Octave Down" ),

@@ -77,6 +77,8 @@ s.waitForBoot{
 		\randDetune, 0,
 		\randomOctave, 1,
 		\octaveGroups, 1,
+		\densFromDurMode, 0,
+		\timeStretch, 1.0,
 	], ~granGrp);
 
 	~fftFx = Synth(\fftFreeze, [
@@ -114,6 +116,7 @@ s.waitForBoot{
 	~fftFreezeState = false;
 	~currentRate = 1.0;
 	~xyMode = false;
+	~densFromDurState = false;
 
 	// ---- MultiXY voice state (5 touch slots) ----
 	~xyVoices      = Array.newClear(5);

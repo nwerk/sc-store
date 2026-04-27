@@ -59,8 +59,9 @@ if (File.exists(~presetDir).not) {
 	data[\liveMode]      = ~liveMode.asInteger;
 	data[\reverseState]  = ~reverseState.asInteger;
 	data[\fixedPosState] = ~fixedPosState.asInteger;
-	data[\fftFreezeState] = ~fftFreezeState.asInteger;
-	data[\currentRate]   = ~currentRate;
+	data[\fftFreezeState]   = ~fftFreezeState.asInteger;
+	data[\densFromDurState] = ~densFromDurState.asInteger;
+	data[\currentRate]      = ~currentRate;
 
 	// Write to disk
 	data.writeArchive(path);
@@ -91,8 +92,9 @@ if (File.exists(~presetDir).not) {
 		~liveMode      = data[\liveMode].asBoolean;
 		~reverseState  = data[\reverseState].asBoolean;
 		~fixedPosState = data[\fixedPosState].asBoolean;
-		~fftFreezeState = (data[\fftFreezeState] ? data[\muteState] ? 0).asBoolean;
-		~currentRate   = data[\currentRate] ? 1.0;
+		~fftFreezeState   = (data[\fftFreezeState] ? data[\muteState] ? 0).asBoolean;
+		~densFromDurState = (data[\densFromDurState] ? 0).asBoolean;
+		~currentRate      = data[\currentRate] ? 1.0;
 
 		// Apply toggle states to synths
 		~rec.set(\recGate, ~recState.asInteger);
@@ -100,6 +102,7 @@ if (File.exists(~presetDir).not) {
 		~g.set(\reverseGrain, ~reverseState.asInteger);
 		~g.set(\fixedPos, ~fixedPosState.asInteger);
 		~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
+		~g.set(\densFromDurMode, ~densFromDurState.asInteger);
 		~g.set(\rate, ~currentRate);
 
 		// Reallocate buffer to match the stored length

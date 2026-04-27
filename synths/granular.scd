@@ -47,7 +47,9 @@ SynthDef.new(\rec, {
 	bufSig = BufRd.ar(1, buf, ptr, 1, 2);
 	// overdub: buffer preserved at fb level, mic always added on top
 	// clip~ -1 1 prevents volume buildup (matches PD behavior)
-	sig = (sig + (bufSig * fb)).clip(-1, 1);
+	// When not recording (recEnv=0), use full feedback (1.0) so the buffer freezes intact.
+	// When recording (recEnv=1), use the CC fb value normally.
+	sig = (sig + (bufSig * (recEnv * (fb - 1.0) + 1.0))).clip(-1, 1);
 
 	// crossfade setup
 	frames = BufFrames.kr(buf);
@@ -99,7 +101,9 @@ SynthDef.new(\gran, {
 	octaveGroups=1,    // 1–50: every Nth grain gets octave-shifted
 	fixedPosRand=0,    // 0–1: per-grain scatter radius around fixedPosSec (fraction of buffer duration)
 	xyMode=0,          // 0: normal CC-bus mode; 1: XY voice mode (bypasses 4 CC reads, overrides candidateCenter)
-	maxDensHz=20000    // XY mode only: per-voice density ceiling (Hz); set by client proportional to voice count
+	maxDensHz=20000,   // XY mode only: per-voice density ceiling (Hz); set by client proportional to voice count
+	densFromDurMode=0, // 0/1: derive density from duration for seamless reconstruction
+	timeStretch=1.0    // playback speed multiplier (0.25–4.0×); only active in densFromDurMode
 	|
 
 	var ccVals;
@@ -122,6 +126,8 @@ SynthDef.new(\gran, {
 	// fixed position latch
 	var fixedPosTrig, fixedPosRise, fpHasPressed, fpLatchFrame, fpLatchDelay;
 	var fpResumeFrame, fpFrozenFrame, normalModePosSec, xyFixedPosSec;
+	// density-from-duration / time-stretch
+	var tsInput, tsOffset;
 
 	// ============================================================
 	// 1. CC BUS READS
@@ -165,6 +171,32 @@ SynthDef.new(\gran, {
 	]);
 	// CC 24: base delay behind the record pointer (PD: ÷127 × 300 ms)
 	ptrSampleDelay  = Select.kr(~busNames[\playheadRand].index, ccVals) * (3 * SampleRate.ir) + minPtrDelay;
+
+	// CC 62: time-stretch factor (two-segment: 0→0.25×, 0.5→1.0×, 1.0→4.0×)
+	// Only meaningful when densFromDurMode=1; ignored otherwise.
+	timeStretch  = Select.kr(
+		Select.kr(~busNames[\timeStretch].index, ccVals) >= 0.5,
+		[
+			Select.kr(~busNames[\timeStretch].index, ccVals).linlin(0.0, 0.5, 0.25, 1.0),
+			Select.kr(~busNames[\timeStretch].index, ccVals).linlin(0.5, 1.0, 1.0, 4.0)
+		]
+	);
+
+	// densFromDurMode: lock density to timeStretch/(baseDur*rate) so grains tile seamlessly
+	// at any playback speed and pitch.
+	// Each grain reads baseDur*rate buffer-seconds; the read head advances timeStretch
+	// buffer-seconds per real-time second → density = timeStretch / (baseDur * rate).
+	// Hanning windows are zero at both edges, so non-overlapping grains leave audible gaps.
+	// A factor of 2 (50% overlap) makes adjacent Hanning windows sum to a constant → gap-free.
+	//
+	// IMPORTANT: the formula above is derived from buffer-space coverage, but real-time grain
+	// overlap depends only on baseDur (rate only affects buffer read speed, not real-time dur).
+	// For timeStretch < 1 the formula yields density < 2/baseDur → less than 50% real-time
+	// overlap → Hanning windows no longer sum to a constant → audible amplitude modulation.
+	// Floor to 2/baseDur to guarantee at least 50% real-time overlap at all stretch factors.
+	dens = Select.kr(densFromDurMode, [dens,
+		(2.0 * timeStretch / (baseDur.max(0.001) * rate.max(0.0001))).max(2.0 / baseDur.max(0.001))
+	]);
 
 	// -- Effects --
 	// CC 54: bit depth — bypassed in XY mode (arg value used directly; 1.05=clean, 0.1=heavy)
@@ -243,10 +275,19 @@ SynthDef.new(\gran, {
 	ptrRand      = LFNoise1.ar(100).bipolar(ptrRandSamples);
 	desiredDelay = (ptrSampleDelay + ptrRand).max(minPtrDelay);
 
+	// densFromDurMode: Integrator accumulates (timeStretch-1)*recSpeedSamp each sample,
+	// shifting the read pointer ahead/behind the live write head at the stretch ratio.
+	// Input is gated to 0 when mode is OFF so the offset freezes (no drift in normal mode).
+	tsInput  = K2A.ar(Select.kr(densFromDurMode, [0.0, (timeStretch - 1.0) * recSpeedSamp]));
+	tsOffset = Integrator.ar(tsInput);
+
 	// XY mode: inject fixedPosSec (frames) + ptrRand jitter as candidate; safety still runs.
 	// LiveMode OFF (fixedPos=1) discards safeCenter anyway — this path is harmless there.
 	candidateCenter = Select.ar(K2A.ar(xyMode), [
-		(ptr - desiredDelay).wrap(0, bufFrames),
+		Select.ar(K2A.ar(densFromDurMode), [
+			(ptr - desiredDelay).wrap(0, bufFrames),                   // normal mode
+			(ptr - desiredDelay + tsOffset).wrap(0, bufFrames)         // reconstruction mode
+		]),
 		(fixedPosSec * SampleRate.ir + ptrRand).wrap(0, bufFrames)
 	]);
 

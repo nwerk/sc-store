@@ -64,8 +64,9 @@
 	~sendToTouchOSC.('/grain/liveMode',  ~liveMode.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/reverse',   ~reverseState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fixedPos',  ~fixedPosState.asInteger.asFloat);
-	~sendToTouchOSC.('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat);
-	~sendToTouchOSC.('/grain/xyMode',    ~xyMode.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/fftFreeze',   ~fftFreezeState.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/xyMode',      ~xyMode.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/densFromDur', ~densFromDurState.asInteger.asFloat);
 
 	// Status
 	~sendToTouchOSC.('/status/rate',      ~currentRate.asFloat);
@@ -101,6 +102,21 @@ OSCdef('/grain/density', { |msg|
 	densHz = 1.0 / (densScaled * 0.8).max(0.005);
 	~touchOSC.sendMsg('/grain/density-label', densHz.round(0.1).asString ++ " Hz");
 }, "/grain/density");
+
+// ---- Time stretch fader: echo raw value + send scaled multiplier to label ----
+// Mirrors the two-segment taper used in the synth (0→0.25×, 0.5→1.0×, 1.0→4.0×).
+OSCdef('/grain/timeStretch', { |msg|
+	var val, tsScaled;
+	val = msg[1].clip(0.0, 1.0);
+	~ccBuses.setAt(~busNames[\timeStretch].index, val);
+	~sendToTouchOSC.('/grain/timeStretch', val);
+	tsScaled = if (val >= 0.5) {
+		val.linlin(0.5, 1.0, 1.0, 4.0)
+	} {
+		val.linlin(0.0, 0.5, 0.25, 1.0)
+	};
+	~touchOSC.sendMsg('/grain/timeStretch-label', tsScaled.round(0.01).asString ++ "×");
+}, "/grain/timeStretch");
 
 // ---- Buffer length fader: directly reallocate buffer ----
 // Overrides the generic fader handler so allocation happens immediately on fader move.
@@ -154,6 +170,15 @@ OSCdef('/grain/fixedPos', { |msg|
 		("Fixed position: " ++ if(~fixedPosState, "ON", "OFF")).postln;
 	};
 }, "/grain/fixedPos");
+
+OSCdef('/grain/densFromDur', { |msg|
+	if (msg[1] >= 1.0) {
+		~densFromDurState = ~densFromDurState.not;
+		~g.set(\densFromDurMode, ~densFromDurState.asInteger);
+		~sendToTouchOSC.('/grain/densFromDur', ~densFromDurState.asInteger.asFloat);
+		("Density from Duration: " ++ if(~densFromDurState, "ON", "OFF")).postln;
+	};
+}, "/grain/densFromDur");
 
 OSCdef('/grain/fftFreeze', { |msg|
 	if (msg[1] >= 1.0) {
