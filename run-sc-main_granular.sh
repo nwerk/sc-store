@@ -53,6 +53,20 @@ kill_processes "pd"
 # Optional: Wait a moment to ensure processes have terminated
 sleep 1
 
+# 2.5. Detect Scarlett 2i2 and switch JACK to it if present
+SCARLETT_LINE=$(aplay -l 2>/dev/null | grep -i "scarlett" | head -n 1)
+if [[ -n "$SCARLETT_LINE" ]]; then
+    SCARLETT_CARD=$(echo "$SCARLETT_LINE" | sed 's/^card \([0-9]*\):.*/\1/')
+    echo "Scarlett 2i2 found on card $SCARLETT_CARD, restarting JACK on hw:$SCARLETT_CARD..."
+    pkill jackd || true
+    sleep 1
+    jackd -d alsa -d hw:"$SCARLETT_CARD" -r 48000 -p 256 -n 2 &
+    sleep 2
+    echo "JACK restarted on Scarlett 2i2."
+else
+    echo "Scarlett 2i2 not found, using pisound via existing JACK."
+fi
+
 # 3. Start the SuperCollider script
 # Define the path to your main.scd script
 SCLANG_SCRIPT="/usr/local/sc-patches/sc-store/main_grain.scd"
