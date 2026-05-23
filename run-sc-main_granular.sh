@@ -37,6 +37,21 @@ cleanup() {
         echo "Terminating sclang (PID: $SCLANG_PID)..."
         kill "$SCLANG_PID" 2>/dev/null || echo "sclang already terminated."
     fi
+
+    # Restore pisound JACK if we switched away from it
+    if [[ "${SCARLETT_JACK_STARTED:-0}" -eq 1 ]]; then
+        echo "Stopping Scarlett JACK and restoring pisound JACK..."
+        sudo pkill -x jackd 2>/dev/null || true
+        sleep 1
+        # Restart the JACK systemd service if it exists, otherwise let pisound handle it
+        if systemctl list-unit-files jack.service &>/dev/null || systemctl list-unit-files jackd.service &>/dev/null; then
+            sudo systemctl start jack jackd 2>/dev/null || true
+        elif command -v jack_control &>/dev/null; then
+            jack_control start 2>/dev/null || true
+        fi
+        echo "Pisound JACK restored."
+    fi
+
     exit 1
 }
 
@@ -54,15 +69,54 @@ kill_processes "pd"
 sleep 1
 
 # 2.5. Detect Scarlett 2i2 and switch JACK to it if present
+# Track whether we started a custom JACK session so we can restore it on exit
+SCARLETT_JACK_STARTED=0
+
 SCARLETT_LINE=$(aplay -l 2>/dev/null | grep -i "scarlett" | head -n 1)
 if [[ -n "$SCARLETT_LINE" ]]; then
     SCARLETT_CARD=$(echo "$SCARLETT_LINE" | sed 's/^card \([0-9]*\):.*/\1/')
-    echo "Scarlett 2i2 found on card $SCARLETT_CARD, restarting JACK on hw:$SCARLETT_CARD..."
-    pkill jackd || true
+    echo "Scarlett 2i2 found on card $SCARLETT_CARD, switching JACK to hw:$SCARLETT_CARD..."
+
+    # Stop any JACK session: try systemd service first, then fall back to pkill
+    if systemctl is-active --quiet jack || systemctl is-active --quiet jackd; then
+        echo "Stopping JACK systemd service..."
+        sudo systemctl stop jack jackd 2>/dev/null || true
+    fi
+    # Also stop jack_control if present
+    if command -v jack_control &>/dev/null; then
+        jack_control stop 2>/dev/null || true
+        sleep 0.5
+    fi
+    # Kill any remaining jackd processes
+    sudo pkill -x jackd 2>/dev/null || true
     sleep 1
+    # Clean up stale JACK shared memory and semaphores
+    sudo rm -f /dev/shm/jack_* 2>/dev/null || true
+    sudo rm -f /tmp/jack_* 2>/dev/null || true
+    # Avoid audio device reservation via session bus (prevents dbus/X11 autolaunch errors)
+    export JACK_NO_AUDIO_RESERVATION=1
+    # Ensure XDG_RUNTIME_DIR is set (avoids related warnings)
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-root}"
+    # Start JACK on the Scarlett card
     jackd -d alsa -d hw:"$SCARLETT_CARD" -r 48000 -p 256 -n 2 &
-    sleep 2
-    echo "JACK restarted on Scarlett 2i2."
+    JACK_PID=$!
+    echo "JACK started on Scarlett 2i2 (PID: $JACK_PID)."
+    SCARLETT_JACK_STARTED=1
+
+    # Wait until JACK is actually ready (up to 10 seconds)
+    echo "Waiting for JACK to become ready..."
+    JACK_READY=0
+    for i in $(seq 1 20); do
+        if jack_lsp &>/dev/null; then
+            echo "JACK is ready."
+            JACK_READY=1
+            break
+        fi
+        sleep 0.5
+    done
+    if [[ "$JACK_READY" -eq 0 ]]; then
+        echo "Warning: JACK did not become ready in time. SuperCollider may not connect to Scarlett."
+    fi
 else
     echo "Scarlett 2i2 not found, using pisound via existing JACK."
 fi
@@ -86,6 +140,19 @@ echo "SuperCollider script started successfully with PID: $SCLANG_PID."
 
 # Wait for the sclang process to finish
 wait "$SCLANG_PID"
+
+# Restore pisound JACK if we switched to Scarlett
+if [[ "${SCARLETT_JACK_STARTED:-0}" -eq 1 ]]; then
+    echo "SuperCollider exited. Stopping Scarlett JACK and restoring pisound JACK..."
+    sudo pkill -x jackd 2>/dev/null || true
+    sleep 1
+    if systemctl list-unit-files jack.service &>/dev/null || systemctl list-unit-files jackd.service &>/dev/null; then
+        sudo systemctl start jack jackd 2>/dev/null || true
+    elif command -v jack_control &>/dev/null; then
+        jack_control start 2>/dev/null || true
+    fi
+    echo "Pisound JACK restored."
+fi
 
 # Optional: Exit the script
 exit 0
