@@ -1,10 +1,13 @@
 [Unit]
 Description=SuperCollider granular patch (sc-store)
-# Jack must be up; no network needed (Pi is the git remote)
-After=sound.target
+# Replace jack.service below with whatever owns jackd on your system
+# Check with: systemctl status $(ps -o unit= -p <jackd-pid>)
+After=sound.target jack.service
+Wants=jack.service
 
 [Service]
 User=patch
+Environment=JACK_NO_AUDIO_RESERVATION=1
 ExecStart=/usr/local/sc-patches/boot-sc.sh
 # Restart if sclang crashes; give Jack time to settle after a crash
 Restart=on-failure
