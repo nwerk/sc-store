@@ -18,19 +18,13 @@ GRANULAR_LAUNCHER="$REPO/run-sc-main_granular.sh"
 
 # ---- 1. Wait for Jack to be ready ----
 # Jack is expected to be started by its own system service (see sc-boot.service After=).
-# We only wait here; we do not start or kill jackd ourselves.
+# jack_wait blocks until the Jack server accepts connections, with a timeout.
 echo "[boot-sc] Waiting for Jack to become available..."
-JACK_TIMEOUT=15
-JACK_ELAPSED=0
-until jack_lsp > /dev/null 2>&1; do
-    if [[ $JACK_ELAPSED -ge $JACK_TIMEOUT ]]; then
-        echo "[boot-sc] ERROR: Jack did not become ready within ${JACK_TIMEOUT}s. Aborting."
-        exit 1
-    fi
-    sleep 1
-    JACK_ELAPSED=$((JACK_ELAPSED + 1))
-done
-echo "[boot-sc] Jack is ready (waited ${JACK_ELAPSED}s)."
+if ! jack_wait -w -t 15; then
+    echo "[boot-sc] ERROR: Jack did not become ready within 15s. Aborting."
+    exit 1
+fi
+echo "[boot-sc] Jack is ready."
 
 # ---- 3. Checkout prod branch ----
 echo "[boot-sc] Checking out prod branch in $REPO..."
