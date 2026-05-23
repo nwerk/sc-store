@@ -24,14 +24,22 @@ JACK_RATE=48000
 JACK_PERIOD=128
 JACK_NPERIODS=3
 
-# ---- 1. Ensure Jack is running ----
-if ! pgrep -x jackd > /dev/null; then
-    echo "[boot-sc] jackd not running — starting on $PISOUND_CARD..."
+# ---- 1. Ensure Jack is running and connectable ----
+# First check if Jack is actually connectable (not just if the process exists).
+# A stale/zombie jackd process will pass pgrep but fail jack_lsp.
+if jack_lsp > /dev/null 2>&1; then
+    echo "[boot-sc] Jack already running and connectable, skipping start."
+else
+    # Kill any stale jackd before starting fresh
+    if pgrep -x jackd > /dev/null; then
+        echo "[boot-sc] Stale jackd found — killing before restart..."
+        pkill -x jackd || true
+        sleep 1
+    fi
+    echo "[boot-sc] Starting jackd on $PISOUND_CARD..."
     jackd -d alsa -d hw:"$PISOUND_CARD" -r "$JACK_RATE" -p "$JACK_PERIOD" -n "$JACK_NPERIODS" &
     JACKD_PID=$!
     echo "[boot-sc] jackd started (PID: $JACKD_PID)"
-else
-    echo "[boot-sc] jackd already running, skipping start."
 fi
 
 # ---- 2. Wait for Jack to be ready ----
