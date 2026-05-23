@@ -8,6 +8,7 @@ Wants=jack.service
 [Service]
 User=patch
 Environment=JACK_NO_AUDIO_RESERVATION=1
+Environment=JACK_PROMISCUOUS_SERVER=jackdrc
 ExecStart=/usr/local/sc-patches/boot-sc.sh
 # Restart if sclang crashes; give Jack time to settle after a crash
 Restart=on-failure
