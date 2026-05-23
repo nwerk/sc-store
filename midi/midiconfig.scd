@@ -35,8 +35,13 @@
 };
 
 
-~connect_midi_devices.("MIDI Mix", "MIDI Mix MIDI 1"); // test it now
-~connect_midi_devices.("FS-1-WL USB-MIDI", "FS-1-WL USB-MIDI MIDI 1"); // test it now
+Platform.case(
+    \linux,   { ~connect_midi_devices.("FS-1-WL USB-MIDI", "FS-1-WL USB-MIDI MIDI 1"); },
+    \windows, { ~connect_midi_devices.("FS-1-WL USB-MIDI", "FS-1-WL USB-MIDI"); }
+);
+// MIDI Mix removed — now controlled via TouchOSC over OSC.
+// Uncomment the line below to re-enable MIDI Mix if needed:
+// ~connect_midi_devices.("MIDI Mix", "MIDI Mix MIDI 1");
 
 MIDIdef.trace(true);
 MIDIdef.cc(
@@ -51,6 +56,64 @@ MIDIdef.cc(
             ~ccBuses.setAt(ccNum, val / 127);
         };
     }
+);
+
+// ---- Boss FS-1-WL expression pedal → master volume ----
+// Deadband suppresses jitter; inline EMA smooths actual movement.
+// ~expPedalLagCoeff: 0.0 = frozen, 1.0 = instant (try 0.1–0.3)
+~lastExpPedalRaw  = nil;
+~expPedalDeadband = 2;
+~expPedalSmoothed = 1.0;
+~expPedalLagCoeff = 0.15;
+
+MIDIdef.cc(\expressionPedalMasterVol,
+	{ |val, ccNum, chan, src|
+		if (~lastExpPedalRaw.isNil or: { (val - ~lastExpPedalRaw).abs > ~expPedalDeadband }) {
+			~lastExpPedalRaw  = val;
+			~expPedalSmoothed = ~expPedalSmoothed + (~expPedalLagCoeff * (val / 127.0 - ~expPedalSmoothed));
+			~setMasterVol !? { ~setMasterVol.(~expPedalSmoothed) };
+		};
+	},
+	ccNum: 11
+);
+
+// ---- Boss FS-1-WL footswitch A (CC 80) → live mode toggle ----
+MIDIdef.cc(\fs1wl_liveMode,
+	{ |val, ccNum, chan, src|
+		if (val == 127) {
+			if (~liveMode) {
+				~stopLiveMode !? { ~stopLiveMode.() };
+			} {
+				~startLiveMode !? { ~startLiveMode.() };
+			};
+			~touchOSC !? { ~touchOSC.sendMsg('/grain/liveMode', ~liveMode.asInteger.asFloat) };
+		};
+	},
+	ccNum: 80
+);
+
+// ---- Boss FS-1-WL footswitch B (CC 81) → delete buffer ----
+MIDIdef.cc(\fs1wl_deleteBuffer,
+	{ |val, ccNum, chan, src|
+		if (val == 127) {
+			~deleteBuffer !? { ~deleteBuffer.() };
+		};
+        "del".poll;
+	},
+	ccNum: 81
+);
+
+// ---- Boss FS-1-WL footswitch C (CC 82) → FFT freeze toggle ----
+MIDIdef.cc(\fs1wl_fftFreeze,
+	{ |val, ccNum, chan, src|
+		if (val == 127) {
+			~fftFreezeState = ~fftFreezeState.not;
+			~ccBuses !? { ~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat) };
+			~touchOSC !? { ~touchOSC.sendMsg('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat) };
+			("FFT Freeze: " ++ if(~fftFreezeState, "ON", "OFF")).postln;
+		};
+	},
+	ccNum: 82
 );
 
 "Config file loaded!".postln;
