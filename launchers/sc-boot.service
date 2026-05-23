@@ -1,0 +1,19 @@
+[Unit]
+Description=SuperCollider granular patch (sc-store)
+# Jack must be up; no network needed (Pi is the git remote)
+After=sound.target
+
+[Service]
+User=patch
+ExecStart=/usr/local/sc-patches/boot-sc.sh
+# Restart if sclang crashes; give Jack time to settle after a crash
+Restart=on-failure
+RestartSec=10
+
+# Keep logs readable
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sc-boot
+
+[Install]
+WantedBy=multi-user.target
