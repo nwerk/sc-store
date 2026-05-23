@@ -1,24 +1,25 @@
 #!/bin/bash
 # ============================================================
-# boot-sc.sh — System boot wrapper for the SC granular patch
+# boot-sc.sh — SC granular patch launcher
 # ============================================================
-# Responsibilities:
-#   1. Ensure Jack is running on pisound (starts it if not)
-#   2. git checkout prod  (local only — Pi is the remote)
-#   3. exec run-sc-main_granular.sh  (hands off PID to systemd)
+# Usage:  boot-sc.sh [branch]
+#   branch  git branch to checkout before launching (default: prod)
 #
-# Deployed to: /usr/local/sc-patches/boot-sc.sh
-# Called by:   sc-boot.service (systemd)
+# Called by sc-boot.service (systemd) and pisound button scripts.
 # ============================================================
 
 set -e
 
+# Source pisound common helpers
+. /usr/local/pisound/scripts/common/common.sh
+
 REPO="/usr/local/sc-patches/sc-store"
 GRANULAR_LAUNCHER="$REPO/run-sc-main_granular.sh"
+BRANCH="${1:-prod}"
 
-# ---- 1. Checkout prod branch ----
-echo "[boot-sc] Checking out prod branch in $REPO..."
-git -C "$REPO" checkout prod
+# ---- 1. Checkout requested branch ----
+echo "[boot-sc] Checking out $BRANCH in $REPO..."
+git -C "$REPO" checkout "$BRANCH"
 echo "[boot-sc] On branch: $(git -C "$REPO" branch --show-current)"
 
 # ---- 4. Hand off to granular launcher ----
