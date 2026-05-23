@@ -11,10 +11,17 @@
 
 (
 // ---- Network setup ----
-// Change ~touchOSCip to your tablet's IP address.
-// TouchOSC default receive port: 9000
-// sclang default listen port: 57120 (NetAddr.langPort)
-~touchOSCip   = "192.168.178.75";
+Platform.case(
+	\linux, {
+		~touchOSCip   = "172.24.1.107";  // ← your TouchOSC device's IP
+	},
+	\windows, {
+		~touchOSCip   = "192.168.178.75";  // ← your TouchOSC device's IP
+	},
+	{
+		"Unknown OS - no TouchOSC device's IP is set".warn;
+	}
+);
 ~touchOSCport = 9000;
 ~touchOSC     = NetAddr(~touchOSCip, ~touchOSCport);
 
