@@ -19,7 +19,7 @@ BRANCH="${1:-prod}"
 
 # ---- 0. Stop systemd service if it is running and we are not it ----
 # When called by a button script, killing sclang would cause the service's
-# run-sc-main_granular.sh to exit non-zero, triggering Restart=on-failure and
+# run-sc-main_multi.sh to exit non-zero, triggering Restart=on-failure and
 # respawning sclang immediately. Stopping the service first prevents that.
 _SERVICE_PID=$(systemctl show sc-boot.service --property=MainPID --value 2>/dev/null || echo "0")
 if [[ "$_SERVICE_PID" != "0" && "$_SERVICE_PID" != "$$" ]]; then
