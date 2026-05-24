@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# boot-sc.sh — SC granular patch launcher
+# boot-sc.sh — SC multi patch launcher
 # ============================================================
 # Usage:  boot-sc.sh [branch]
 #   branch  git branch to checkout before launching (default: prod)
@@ -14,7 +14,7 @@ set -e
 . /usr/local/pisound/scripts/common/common.sh
 
 REPO="/usr/local/sc-patches/sc-store"
-GRANULAR_LAUNCHER="$REPO/run-sc-main_multi.sh"
+MULTI_LAUNCHER="$REPO/run-sc-main_multi.sh"
 BRANCH="${1:-prod}"
 
 # ---- 0. Stop systemd service if it is running and we are not it ----
@@ -42,11 +42,11 @@ echo "[boot-sc] Checking out $BRANCH in $REPO..."
 git -C "$REPO" checkout "$BRANCH"
 echo "[boot-sc] On branch: $(git -C "$REPO" branch --show-current)"
 
-# ---- 3. Hand off to granular launcher ----
-if [[ ! -x "$GRANULAR_LAUNCHER" ]]; then
-    echo "[boot-sc] ERROR: $GRANULAR_LAUNCHER not found or not executable."
+# ---- 4. Hand off to multi launcher ----
+if [[ ! -x "$MULTI_LAUNCHER" ]]; then
+    echo "[boot-sc] ERROR: $MULTI_LAUNCHER not found or not executable."
     exit 1
 fi
 
-echo "[boot-sc] Launching $GRANULAR_LAUNCHER..."
-exec "$GRANULAR_LAUNCHER"
+echo "[boot-sc] Launching $MULTI_LAUNCHER..."
+exec "$MULTI_LAUNCHER"

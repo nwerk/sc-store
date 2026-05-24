@@ -123,7 +123,7 @@ fi
 
 # 3. Start the SuperCollider script
 # Define the path to your main.scd script
-SCLANG_SCRIPT="/usr/local/sc-patches/sc-store/main_grain.scd"
+SCLANG_SCRIPT="/usr/local/sc-patches/sc-store/main_multi.scd"
 
 # Check if the script exists
 if [[ ! -f "$SCLANG_SCRIPT" ]]; then
