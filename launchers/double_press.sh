@@ -4,4 +4,6 @@
 
 flash_leds 255
 
-/usr/local/sc-patches/boot-sc.sh dev
+# Run in background so this script exits immediately and the button handler
+# returns to listening for new presses.
+nohup /usr/local/sc-patches/boot-sc.sh dev </dev/null >/tmp/boot-sc.log 2>&1 &
