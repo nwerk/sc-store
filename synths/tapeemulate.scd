@@ -29,7 +29,7 @@ SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
 			badness = badness * 7;
 			badness = badness * volSig; // Scale badness by volume control
 			badness = (badness + (badnessMap * volSig)).clip(0,7);
-			badness.poll(1, "badness");
+			//badness.poll(1, "badness");
 			sig = [noiseL, noiseR];
 			sig = LPF.ar(sig, 100);
 			sig = sig + LeakDC.ar((LocalIn.ar(2, sig) * -1), 0.995); // Use 2 channels for LocalIn
@@ -40,7 +40,7 @@ SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
 			saw = [LFSaw.ar(pitch[0], 0, 1), LFSaw.ar(pitch[1], 0, 1)];
 			saw = LPF.ar(saw, 2500);
 			wavemix = (wavemix + (waveMap * volSig)).clip(0,1);
-			volSig.poll;
+			//volSig.poll;
 			sig = (wavemix * saw) + ((1 - wavemix) * sine);
 			sig = sig * volSig;
 			LocalOut.ar(sig);

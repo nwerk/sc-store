@@ -55,7 +55,7 @@ SynthDef(\tartiniTracker_sigmundStyle, { |inChan=0, freqBus=0, ampBus=1, lagAmpB
 
     //freqSm_hold.poll(1, "tartini_freqHz");
     //ampSm.poll(1, "tartini_amp");
-    lagAmpSm.poll(1, "tartini_window_amp");
+    //lagAmpSm.poll(1, "tartini_window_amp");
     //onsetTrig.poll(1, "onset_trigger");
 }).add;
 )
