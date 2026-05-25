@@ -4,6 +4,6 @@
 
 flash_leds 100
 
-# Run in background so this script exits immediately and the button handler
-# returns to listening for new presses.
-nohup /usr/local/sc-patches/boot-sc.sh prod </dev/null >/tmp/boot-sc.log 2>&1 &
+# setsid puts boot-sc.sh in its own session so it is fully detached from the
+# button handler's process group — pisound-btn can return to listening immediately.
+setsid /usr/local/sc-patches/boot-sc.sh prod >/tmp/boot-sc.log 2>&1 &
