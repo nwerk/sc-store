@@ -103,7 +103,13 @@ SynthDef.new(\gran, {
 	xyMode=0,          // 0: normal CC-bus mode; 1: XY voice mode (bypasses 4 CC reads, overrides candidateCenter)
 	maxDensHz=20000,   // XY mode only: per-voice density ceiling (Hz); set by client proportional to voice count
 	densFromDurMode=0, // 0/1: derive density from duration for seamless reconstruction
-	timeStretch=1.0    // playback speed multiplier (0.25–4.0×); only active in densFromDurMode
+	timeStretch=1.0,   // playback speed multiplier (0.25–4.0×); only active in densFromDurMode
+	// ---- Pitch-tracker mode ----
+	pitchTrackMode=0,  // 0: normal CC-bus control; 1: guitar pitch/amp drives density+volume
+	freqTrackBus=0,    // kr bus index for Tartini frequency output (~freqBus.index)
+	ampTrackBus=0,     // kr bus index for Tartini amplitude output (~ampBus.index)
+	ptRateScale=0,     // depth of amp→rate modulation in pitchTrackMode (0=off, 1=max)
+	ptDensOverlap=2    // grain overlap factor: dens = ptFreq * ptDensOverlap (2 = 50% overlap)
 	|
 
 	var ccVals;
@@ -128,6 +134,8 @@ SynthDef.new(\gran, {
 	var fpResumeFrame, fpFrozenFrame, normalModePosSec, xyFixedPosSec;
 	// density-from-duration / time-stretch
 	var tsInput, tsOffset;
+	// pitch-tracker mode
+	var ptFreq, ptAmp;
 
 	// ============================================================
 	// 1. CC BUS READS
@@ -213,6 +221,21 @@ SynthDef.new(\gran, {
 	// CC 56/57: read-pointer freeze modulation
 	readModRate  = Select.kr(~busNames[\speedModRate].index,  ccVals).linlin(0, 1, 0.05, 8.0);
 	readModDepth = Select.kr(~busNames[\speedModDepth].index, ccVals);
+
+	// ============================================================
+	// 1c. PITCH-TRACKER MODE OVERRIDES
+	// ============================================================
+	// pitchTrackMode=1: guitar pitch drives grain density, guitar amplitude drives volume.
+	// ptFreq.max(1) prevents divide-by-zero when guitar is silent (Tartini returns 0).
+	ptFreq = In.kr(freqTrackBus).max(1);    // Hz
+	ptAmp  = In.kr(ampTrackBus).lag(0.05);  // 0–1, smoothed
+
+	// Density = guitar Hz × overlap factor (1 grain per fundamental period × ptDensOverlap)
+	dens    = Select.kr(pitchTrackMode, [dens,    ptFreq * ptDensOverlap]);
+	// Duration = one fundamental period per grain (seamless tiling at guitar pitch)
+	baseDur = Select.kr(pitchTrackMode, [baseDur, 1.0 / ptFreq]);
+	// Optional: amplitude-driven pitch modulation on top of the CC rate fader
+	rate    = Select.kr(pitchTrackMode, [rate,    rate * (1.0 + ptAmp * ptRateScale * 2)]);
 
 	// ============================================================
 	// 2. ENVELOPE & TRIGGER
@@ -374,7 +397,7 @@ SynthDef.new(\gran, {
 		interp:      4,
 	);
 
-	sig = sig * env * amp;
+	sig = sig * env * amp * Select.kr(pitchTrackMode, [1.0, ptAmp]);
 
 	// ============================================================
 	// 6. EFFECTS CHAIN (bit crusher → tanh soft-clip → LPF)

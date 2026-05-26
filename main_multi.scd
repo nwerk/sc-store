@@ -113,6 +113,11 @@ s.waitForBoot {
 		\octaveGroups,    1,
 		\densFromDurMode, 0,
 		\timeStretch,     1.0,
+		\pitchTrackMode,  0,
+		\freqTrackBus,    ~freqBus.index,
+		\ampTrackBus,     ~ampBus.index,
+		\ptRateScale,     0.0,
+		\ptDensOverlap,   2.0,
 	], ~granGrp);
 
 	~fftFx = Synth(\fftFreeze, [
@@ -173,8 +178,12 @@ s.waitForBoot {
 	~fixedPosState  = false;
 	~fftFreezeState = false;
 	~currentRate    = 1.0;
-	~xyMode         = false;
+	~xyMode           = false;
 	~densFromDurState = false;
+	~pitchTrackMode   = false;
+	~ptRateScale      = 0.0;
+	~ptFixedPosSec    = 0.0;
+	~samplePath       = nil;
 
 	// ---- MultiXY voice state (5 touch slots) ----
 	~xyVoices      = Array.newClear(5);

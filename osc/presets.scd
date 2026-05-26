@@ -62,6 +62,10 @@ if (File.exists(~presetDir).not) {
 	data[\fftFreezeState]   = ~fftFreezeState.asInteger;
 	data[\densFromDurState] = ~densFromDurState.asInteger;
 	data[\currentRate]      = ~currentRate;
+	data[\pitchTrackMode]   = ~pitchTrackMode.asInteger;
+	data[\ptRateScale]      = ~ptRateScale;
+	data[\ptFixedPosSec]    = ~ptFixedPosSec;
+	data[\samplePath]       = ~samplePath;
 
 	// Write to disk
 	data.writeArchive(path);
@@ -95,6 +99,10 @@ if (File.exists(~presetDir).not) {
 		~fftFreezeState   = (data[\fftFreezeState] ? data[\muteState] ? 0).asBoolean;
 		~densFromDurState = (data[\densFromDurState] ? 0).asBoolean;
 		~currentRate      = data[\currentRate] ? 1.0;
+		~pitchTrackMode   = (data[\pitchTrackMode] ? 0).asBoolean;
+		~ptRateScale      = data[\ptRateScale]    ? 0.0;
+		~ptFixedPosSec    = data[\ptFixedPosSec]  ? 0.0;
+		~samplePath       = data[\samplePath];
 
 		// Apply toggle states to synths
 		~rec.set(\recGate, ~recState.asInteger);
@@ -104,6 +112,11 @@ if (File.exists(~presetDir).not) {
 		~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
 		~g.set(\densFromDurMode, ~densFromDurState.asInteger);
 		~g.set(\rate, ~currentRate);
+		~g.set(\pitchTrackMode, ~pitchTrackMode.asInteger,
+		       \ptRateScale,    ~ptRateScale,
+		       \fixedPosSec,    ~ptFixedPosSec);
+		if (~pitchTrackMode) { ~g.set(\fixedPos, 1) };
+		~samplePath !? { ~loadBuffer.(~samplePath) };
 
 		// Reallocate buffer to match the stored length
 		// (must be after toggle states so ~recState/~liveMode are already restored)

@@ -79,8 +79,12 @@ Platform.case(
 	~sendToTouchOSC.('/grain/reverse',     ~reverseState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fixedPos',    ~fixedPosState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fftFreeze',   ~fftFreezeState.asInteger.asFloat);
-	~sendToTouchOSC.('/grain/xyMode',      ~xyMode.asInteger.asFloat);
-	~sendToTouchOSC.('/grain/densFromDur', ~densFromDurState.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/xyMode',         ~xyMode.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/densFromDur',    ~densFromDurState.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/pitchTrackMode', ~pitchTrackMode.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/pitchMode/pos',
+		(~ptFixedPosSec / ~bufferDurSec.max(0.001)).clip(0.0, 1.0).asFloat);
+	~sendToTouchOSC.('/grain/pitchMode/rateScale', ~ptRateScale.asFloat);
 
 	// Status
 	~sendToTouchOSC.('/status/rate',      ~currentRate.asFloat);
@@ -188,6 +192,43 @@ OSCdef('/grain/densFromDur', { |msg|
 		("Density from Duration: " ++ if(~densFromDurState, "ON", "OFF")).postln;
 	};
 }, "/grain/densFromDur");
+
+// ---- Pitch-tracker mode toggle ----
+// On activation: forces fixedPos=1, stops live mode.
+// Modulation params stay at their current CC bus values (user adjusts freely).
+OSCdef('/grain/pitchTrackMode', { |msg|
+	if (msg[1] >= 1.0) {
+		~pitchTrackMode = ~pitchTrackMode.not;
+		~g.set(\pitchTrackMode, ~pitchTrackMode.asInteger);
+		if (~pitchTrackMode) {
+			~g.set(\fixedPos, 1);
+			~fixedPosState = true;
+			~sendToTouchOSC.('/grain/fixedPos', 1.0);
+			if (~liveMode) { ~stopLiveMode.() };
+			~sendToTouchOSC.('/grain/liveMode', 0.0);
+		};
+		~sendToTouchOSC.('/grain/pitchTrackMode', ~pitchTrackMode.asInteger.asFloat);
+		("Pitch Track Mode: " ++ if(~pitchTrackMode, "ON", "OFF")).postln;
+	};
+}, "/grain/pitchTrackMode");
+
+// ---- Pitch-tracker: sample position slider (0–1 → 0–bufferDur seconds) ----
+OSCdef('/grain/pitchMode/pos', { |msg|
+	var val    = msg[1].clip(0.0, 1.0);
+	var posSec = val * ~bufferDurSec;
+	~ptFixedPosSec = posSec;
+	~g.set(\fixedPosSec, posSec);
+	~sendToTouchOSC.('/grain/pitchMode/pos', val);
+	~touchOSC.sendMsg('/grain/pitchMode/pos-label', posSec.round(0.01).asString ++ "s");
+}, "/grain/pitchMode/pos");
+
+// ---- Pitch-tracker: amplitude→rate modulation depth ----
+OSCdef('/grain/pitchMode/rateScale', { |msg|
+	var val = msg[1].clip(0.0, 1.0);
+	~ptRateScale = val;
+	~g.set(\ptRateScale, val);
+	~sendToTouchOSC.('/grain/pitchMode/rateScale', val);
+}, "/grain/pitchMode/rateScale");
 
 OSCdef('/grain/fftFreeze', { |msg|
 	if (msg[1] >= 1.0) {
