@@ -231,9 +231,7 @@ SynthDef.new(\gran, {
 	ptAmp  = In.kr(ampTrackBus).lag(0.05);  // 0–1, smoothed
 
 	// Density = guitar Hz × overlap factor (1 grain per fundamental period × ptDensOverlap)
-	dens    = Select.kr(pitchTrackMode, [dens,    ptFreq * ptDensOverlap]);
-	// Duration = one fundamental period per grain (seamless tiling at guitar pitch)
-	baseDur = Select.kr(pitchTrackMode, [baseDur, 1.0 / ptFreq]);
+	dens    = Select.kr(pitchTrackMode, [dens,    ptFreq]);
 	// Optional: amplitude-driven pitch modulation on top of the CC rate fader
 	rate    = Select.kr(pitchTrackMode, [rate,    rate * (1.0 + ptAmp * ptRateScale * 2)]);
 
