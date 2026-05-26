@@ -230,10 +230,14 @@ SynthDef.new(\gran, {
 	ptFreq = In.kr(freqTrackBus).max(1);    // Hz
 	ptAmp  = In.kr(ampTrackBus).lag(0.05);  // 0–1, smoothed
 
-	// Density = guitar Hz × overlap factor (1 grain per fundamental period × ptDensOverlap)
+	// Density = guitar Hz (trigger rate = pitch frequency)
 	dens    = Select.kr(pitchTrackMode, [dens,    ptFreq]);
+	// Duration = ptDensOverlap periods → seamless Hanning overlap; no gaps = clean steady tone
+	baseDur = Select.kr(pitchTrackMode, [baseDur, ptDensOverlap / ptFreq]);
 	// Optional: amplitude-driven pitch modulation on top of the CC rate fader
 	rate    = Select.kr(pitchTrackMode, [rate,    rate * (1.0 + ptAmp * ptRateScale * 2)]);
+	// Modulation params (randomOctave, detune, LFO, jitter, panRand) are zeroed at activation
+	// via the OSC toggle preset — user can freely adjust them after the mode is on.
 
 	// ============================================================
 	// 2. ENVELOPE & TRIGGER

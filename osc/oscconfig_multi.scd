@@ -194,18 +194,35 @@ OSCdef('/grain/densFromDur', { |msg|
 }, "/grain/densFromDur");
 
 // ---- Pitch-tracker mode toggle ----
-// On activation: forces fixedPos=1, stops live mode.
-// Modulation params stay at their current CC bus values (user adjusts freely).
+// On activation: forces fixedPos=1, stops live mode, applies modulation preset (all zeros).
+// Modulation CC buses are set to 0 so sliders snap; user can freely adjust from there.
 OSCdef('/grain/pitchTrackMode', { |msg|
 	if (msg[1] >= 1.0) {
 		~pitchTrackMode = ~pitchTrackMode.not;
 		~g.set(\pitchTrackMode, ~pitchTrackMode.asInteger);
 		if (~pitchTrackMode) {
+			// Position lock
 			~g.set(\fixedPos, 1);
 			~fixedPosState = true;
 			~sendToTouchOSC.('/grain/fixedPos', 1.0);
+			// Stop live mode
 			if (~liveMode) { ~stopLiveMode.() };
 			~sendToTouchOSC.('/grain/liveMode', 0.0);
+			// Force Impulse trigger + no rate scatter (not CC-bus driven)
+			~g.set(\sync, 1, \rateRand, 1);
+			// Zero modulation CC buses + send slider feedback to TouchOSC
+			~ccBuses.setAt(~busNames[\randomOctave].index, 0.0);
+			~ccBuses.setAt(~busNames[\randDetune].index,   0.0);
+			~ccBuses.setAt(~busNames[\freqModAmt].index,   0.0);
+			~ccBuses.setAt(~busNames[\freqModFreq].index,  0.0);
+			~ccBuses.setAt(~busNames[\jitter].index,       0.0);
+			~ccBuses.setAt(~busNames[\panRand].index,      0.0);
+			~sendToTouchOSC.('/grain/randomOctave', 0.0);
+			~sendToTouchOSC.('/grain/randDetune',   0.0);
+			~sendToTouchOSC.('/grain/freqModAmt',   0.0);
+			~sendToTouchOSC.('/grain/freqModFreq',  0.0);
+			~sendToTouchOSC.('/grain/jitter',       0.0);
+			~sendToTouchOSC.('/grain/panRand',      0.0);
 		};
 		~sendToTouchOSC.('/grain/pitchTrackMode', ~pitchTrackMode.asInteger.asFloat);
 		("Pitch Track Mode: " ++ if(~pitchTrackMode, "ON", "OFF")).postln;
