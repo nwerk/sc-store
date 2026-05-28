@@ -347,8 +347,9 @@ OSCdef('/grain/stopAudio', { |msg|
 ~diskRecState = false;
 
 OSCdef('/record/disk', { |msg|
-	if (msg[1] >= 1.0) {
-		~diskRecState = ~diskRecState.not;
+	var on = msg[1] >= 0.5;
+	if (on != ~diskRecState) {
+		~diskRecState = on;
 		if (~diskRecState) {
 			s.record;
 			("Disk recording STARTED: " ++ s.recorder.path).postln;
