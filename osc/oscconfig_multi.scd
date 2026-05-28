@@ -86,6 +86,9 @@ Platform.case(
 		(~ptFixedPosSec / ~bufferDurSec.max(0.001)).clip(0.0, 1.0).asFloat);
 	~sendToTouchOSC.('/grain/pitchMode/rateScale', ~ptRateScale.asFloat);
 
+	// Disk recording
+	~sendToTouchOSC.('/record/disk', (~diskRecState ? false).asInteger.asFloat);
+
 	// Status
 	~sendToTouchOSC.('/status/rate',      ~currentRate.asFloat);
 	~sendToTouchOSC.('/status/bufferLen', ~bufferDurSec.asFloat);
@@ -339,6 +342,23 @@ OSCdef('/grain/stopAudio', { |msg|
 		s.freeAll;
 	};
 }, "/grain/stopAudio");
+
+// ---- Disk recording (master output to file) ----
+~diskRecState = false;
+
+OSCdef('/record/disk', { |msg|
+	if (msg[1] >= 1.0) {
+		~diskRecState = ~diskRecState.not;
+		if (~diskRecState) {
+			s.record;
+			("Disk recording STARTED: " ++ s.recorder.path).postln;
+		} {
+			s.stopRecording;
+			"Disk recording STOPPED.".postln;
+		};
+		~sendToTouchOSC.('/record/disk', ~diskRecState.asInteger.asFloat);
+	};
+}, "/record/disk");
 
 // ---- Synth enable/disable ----
 
