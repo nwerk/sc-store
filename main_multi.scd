@@ -22,7 +22,7 @@ thisProcess.interpreter.executeFile(~basePath ++ "synths/granular.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
 // tapeemulate.scd uses ~busNames[\badness] etc. — now baked as 90–96
 thisProcess.interpreter.executeFile(~basePath ++ "synths/tapeemulate.scd");
-// inputtracker.scd: \tartiniTracker_sigmundStyle (no ~busNames refs)
+// inputtracker.scd: ~polyTrackerNew (polyphonic ML tracker) + \polyTracker SynthDef (no ~busNames refs)
 thisProcess.interpreter.executeFile(~basePath ++ "classes/inputtracker.scd");
 // master.scd: \master SynthDef uses ~busNames[\masterVol].index = 11 (grain master)
 thisProcess.interpreter.executeFile(~basePath ++ "classes/master.scd");
@@ -47,8 +47,8 @@ s.waitForBoot {
 	~fftInBus    = Bus.audio(s, 2);   // grain → FFT stage input
 	~grainOutBus = Bus.audio(s, 2);   // FFT stage output → grain master
 	~tapeOutBus  = Bus.audio(s, 2);   // \ape output → tape output stage
-	~freqBus     = Bus.control(s, 1); // Tartini pitch output
-	~ampBus      = Bus.control(s, 1); // Tartini amplitude output
+	~freqBus     = Bus.control(s, 1); // tracker mono pitch output
+	~ampBus      = Bus.control(s, 1); // tracker amplitude output
 	s.sync;
 
 	// ---- Groups (ordered for signal flow) ----
@@ -125,9 +125,13 @@ s.waitForBoot {
 		\morphAmt,    0,
 	], ~fftGrp);
 
-	// ---- Tartini pitch tracker (shared; used by \ape) ----
-	~tartini = Synth(\tartiniTracker_sigmundStyle,
-		[\inChan, 0, \freqBus, ~freqBus, \ampBus, ~ampBus], ~tartiniGrp);
+	// ---- Polyphonic pitch tracker (shared; used by \ape) ----
+	// ~tartini keeps its old name: oscconfig_multi.scd pauses/resumes it with .run(false/true)
+	~tartini = ~polyTrackerNew.(s, (
+		inChan: 0, freqBus: ~freqBus, ampBus: ~ampBus,
+		target: ~tartiniGrp, addAction: \addToHead
+	)).start;
+	if(~synthEnabled[\tape].not) { ~tartini.run(false) };  // tape starts disabled: no analysis until it is enabled
 
 	// ---- Tape chain ----
 	// \ape reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time).

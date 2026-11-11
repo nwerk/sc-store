@@ -36,6 +36,7 @@ for proc in sclang scsynth; do
         sleep 1
     fi
 done
+pkill -f "polytracker run" 2>/dev/null || true  # leftover pitch tracker, if any
 
 # ---- 2. Checkout requested branch ----
 echo "[boot-sc] Checking out $BRANCH in $REPO..."
