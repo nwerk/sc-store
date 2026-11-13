@@ -13,17 +13,26 @@
 
 (
 // ---- Network setup ----
-Platform.case(
-	\linux, {
-		~touchOSCip = "172.24.1.107";  // ← TouchOSC device's IP
-	},
-	\windows, {
-		~touchOSCip = "192.168.178.75";  // ← TouchOSC device's IP
-	},
-	{
-		"Unknown OS - no TouchOSC device's IP is set".warn;
-	}
-);
+// The defaults below are the production network (Linux = the Pi's hotspot) and a Windows test setup.
+// To test elsewhere without editing this file, put the tablet's IP in the environment, e.g.
+//   TOUCHOSC_IP=192.168.0.50 sclang main_multi.scd
+// The tablet has to send to this machine too: TouchOSC's OSC target = this machine's IP, port NetAddr.langPort (57120).
+~touchOSCip = "TOUCHOSC_IP".getenv;
+if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
+	Platform.case(
+		\linux, {
+			~touchOSCip = "172.24.1.107";  // ← TouchOSC device's IP
+		},
+		\windows, {
+			~touchOSCip = "192.168.178.75";  // ← TouchOSC device's IP
+		},
+		{
+			"Unknown OS - no TouchOSC device's IP is set".warn;
+		}
+	);
+} {
+	"TouchOSC address taken from $TOUCHOSC_IP".postln;
+};
 ~touchOSCport = 9000;
 ~touchOSC     = NetAddr(~touchOSCip, ~touchOSCport);
 
@@ -31,25 +40,31 @@ Platform.case(
 "SC listening on port: %".format(NetAddr.langPort).postln;
 
 // ---- OSC debug logging ----
+// Off by default (the tablet's faders send many messages per second). Switch on with
+//   OSC_LOG=1 sclang main_multi.scd      or at runtime:  ~setOscLogging.(true)  /  ~setOscLogging.(false)
+// Hooks into the language's receive path: an OSCFunc with a nil path matches nothing, so it cannot be used
+// as a catch-all. Replies from scsynth and the pitch tracker's own messages are left out.
 ~setOscLogging = { |enabled=true|
+	if (~oscLogger.notNil) {
+		thisProcess.removeOSCRecvFunc(~oscLogger);
+		~oscLogger = nil;
+	};
 	if (enabled) {
-		if (~oscLogger.notNil) { ~oscLogger.free; };
-		~oscLogger = OSCFunc({ |msg, time, addr, recvPort|
-			("[OSC IN] addr:% from:%:% port:% msg:%"
-				.format(msg[0], addr.ip, addr.port, recvPort, msg)
-			).postln;
-		}, nil);
-		"OSC logging enabled (all incoming messages).".postln;
-	} {
-		if (~oscLogger.notNil) {
-			~oscLogger.free;
-			~oscLogger = nil;
+		~oscLogger = { |msg, time, addr, recvPort|
+			if ((addr.port != s.addr.port) and: { msg[0].asString.beginsWith("/polytracker/").not }) {
+				("[OSC IN] addr:% from:%:% port:% msg:%"
+					.format(msg[0], addr.ip, addr.port, recvPort, msg)
+				).postln;
+			};
 		};
-		"OSC logging disabled.".postln;
+		thisProcess.addOSCRecvFunc(~oscLogger);
+		"OSC logging enabled (incoming messages from the tablet and other clients).".postln;
+	} {
+		"OSC logging off (OSC_LOG=1 or ~setOscLogging.(true) shows incoming messages).".postln;
 	};
 };
 
-~setOscLogging.(true);
+~setOscLogging.("OSC_LOG".getenv == "1");
 
 // ---- Feedback helper ----
 ~sendToTouchOSC = { |addr, value|
