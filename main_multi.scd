@@ -19,7 +19,17 @@ thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig_multi.scd");
 // granular.scd uses ~busNames[\density] etc. (grain indices, unchanged)
 thisProcess.interpreter.executeFile(~basePath ++ "synths/granular.scd");
 // fft_freeze.scd uses ~busNames[\fftFreeze] etc. (grain indices, unchanged)
-thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
+// fft_freeze.scd needs PV_Freeze / PV_Morph from sc3-plugins. Without them the whole file fails to compile, \fftFreeze
+// never exists, and the grain output (it is routed through that synth) never reaches the master = silence.
+// Fall back to a dry pass-through so the patch still sounds; freeze / filter / morph do nothing until it is installed.
+if(\PV_Freeze.asClass.notNil and: { \PV_Morph.asClass.notNil }) {
+	thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
+} {
+	"sc3-plugins is not installed (PV_Freeze / PV_Morph missing): FFT freeze/morph DISABLED, grain output passes through dry. Install it with: sudo apt install sc3-plugins".warn;
+	SynthDef(\fftFreeze, { |micIn=0, granIn=0, out=0, ccBus=0, freeze=0, fftFilterAmt=0, morphAmt=0, fftVol=0|
+		Out.ar(out, In.ar(granIn, 2));
+	}).add;
+};
 // tapeemulate.scd uses ~busNames[\badness] etc. — now baked as 90–96
 thisProcess.interpreter.executeFile(~basePath ++ "synths/tapeemulate.scd");
 // inputtracker.scd: ~polyTrackerNew (polyphonic ML tracker) + \polyTracker SynthDef (no ~busNames refs)
@@ -125,7 +135,7 @@ s.waitForBoot {
 		\morphAmt,    0,
 	], ~fftGrp);
 
-	// ---- Polyphonic pitch tracker (shared; used by \ape) ----
+	// ---- Polyphonic pitch tracker (shared; used by \apePoly) ----
 	// ~tartini keeps its old name: oscconfig_multi.scd pauses/resumes it with .run(false/true)
 	~tartini = ~polyTrackerNew.(s, (
 		inChan: 0, freqBus: ~freqBus, ampBus: ~ampBus,
@@ -134,13 +144,17 @@ s.waitForBoot {
 	if(~synthEnabled[\tape].not) { ~tartini.run(false) };  // tape starts disabled: no analysis until it is enabled
 
 	// ---- Tape chain ----
-	// \ape reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time).
-	~ape = Synth(\ape, [
-		\ccBus,       ~ccBuses,
-		\input_pitch, ~freqBus.index,
-		\vol,         ~ampBus.index,
-		\out,         ~tapeOutBus,
+	// \apePoly = \ape with one oscillator per tracked note (up to 6), so chords are played as chords.
+	// It reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time), like \ape.
+	// Tweak: ~ape.set(\voiceBalance, 0)  all notes equally loud (1 = follow the guitar's note levels)
+	//        ~ape.set(\rel, 0.5)          longer note release (s);  \atk attack (s);  \freqLag pitch smoothing (s)
+	~ape = Synth(\apePoly, [
+		\ccBus,   ~ccBuses,
+		\polyBus, ~tartini[\block].index,
+		\vol,     ~ampBus.index,
+		\out,     ~tapeOutBus,
 	], ~tapeGrp);
+	if(~synthEnabled[\tape].not) { ~ape.run(false) };  // no DSP while tape is off; /synth/tape/enable resumes it
 
 	// ---- Master synths ----
 	// Grain master: reads CC 11 (masterVol) via \master SynthDef; starts enabled.
