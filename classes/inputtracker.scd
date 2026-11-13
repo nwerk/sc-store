@@ -1,7 +1,8 @@
 // Polyphonic guitar pitch tracker (replaces the old Tartini-based tracker).
 //
-// A small neural network runs in an external Python process (tracker/polytracker, numpy only, ~13 % of one
-// laptop core at its default 5.3 ms hop; measure your Pi with `python -m polytracker bench`). It listens to
+// A small neural network runs in an external Python process (tracker/polytracker, numpy only, ~9 % of one
+// laptop core at a 5.3 ms hop; measure your Pi with `python -m polytracker bench`). At startup it measures the
+// machine and picks a 5.3 ms hop, or 10.7 ms if the CPU cannot keep up comfortably (`hop:` option). It listens to
 // the guitar through its own JACK input and writes its results straight into a block of control buses on
 // scsynth (OSC /c_setn) - sclang is not in the audio path.
 // Note on/off events are additionally sent to sclang (/polytracker/noteOn, /polytracker/noteOff).
@@ -100,6 +101,7 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 		model: nil,                          // default: tracker/models/guitar_v1.npz
 		jackPort: nil,                       // default: system:capture_<inChan+1>
 		monoMode: \latest, controlPort: 57150, cpu: nil, rtPriority: 50,
+		hop: \auto,                          // \auto (measure at startup), 256 (5.3 ms) or 512 (10.7 ms, half the CPU)
 		decoderArgs: "",                     // extra command line, e.g. "--on 0.6 --gate-db -70"
 		verbose: false
 	);
@@ -128,7 +130,11 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 
 	t[\command] = { |self|
 		var o = self[\opts], s = self[\server];
-		var home = o[\home], py = o[\python] ? (home +/+ ".venv/bin/python");
+		// Absolute paths: the command cd's into home before exec'ing python, so paths relative to sclang's working
+		// directory (e.g. after `sclang main_multi.scd`) would no longer resolve. No realpath on python: resolving
+		// the .venv/bin/python symlink would bypass the virtualenv.
+		var abs = { |p| if(p.notNil and: { p[0] != $/ } and: { p.contains("/") }) { File.getcwd +/+ p } { p } };
+		var home = abs.(o[\home]), py = abs.(o[\python] ? (home +/+ ".venv/bin/python"));
 		var cmd;
 		if(File.exists(py).not) { py = "python3" };
 		cmd = "cd % && exec % -m polytracker run --input % --scsynth 127.0.0.1:% --lang 127.0.0.1:% --bus % --voices % --control-port % --mono-mode % --parent-pid %".format(
@@ -137,7 +143,7 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 			s.addr.port, NetAddr.langPort, self[\block].index, o[\voices], o[\controlPort], o[\monoMode], thisProcess.pid);
 		o[\model] !? { cmd = cmd ++ " --model " ++ o[\model].shellQuote };
 		o[\cpu] !? { cmd = cmd ++ " --cpu " ++ o[\cpu] };
-		cmd = cmd ++ " --rt-priority " ++ o[\rtPriority];
+		cmd = cmd ++ " --rt-priority " ++ o[\rtPriority] ++ " --hop " ++ o[\hop];
 		if(o[\verbose]) { cmd = cmd ++ " --verbose" };
 		cmd ++ " " ++ o[\decoderArgs]
 	};

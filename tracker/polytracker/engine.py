@@ -24,6 +24,7 @@ class Tracker:
         self.model = model
         self.fe = Frontend(self.cfg)
         self.dec = Decoder(self.cfg, params, n_fft=self.fe.n_long)
+        self._db_short: dict[int, np.ndarray] = {}  # frame end sample -> short log spectrum, for the flux channel
 
     @staticmethod
     def load(path: str | Path | None = None, **kw) -> "Tracker":
@@ -34,8 +35,18 @@ class Tracker:
         return self.cfg.history
 
     def process(self, hist: np.ndarray, t: float) -> list[NoteEvent]:
-        """One frame: ``hist`` holds the newest ``history`` samples (float32)."""
-        f = self.fe.compute(hist[None, :])
+        """One frame: ``hist`` holds the newest ``history`` samples (float32), ending at time ``t``.
+
+        ``t`` must be the absolute stream time of the last sample (as the realtime loop and ``bench`` pass it):
+        it identifies the frame whose short spectrum is reused, so frames do not need to be consecutive.
+        """
+        end = int(round(t * self.cfg.sample_rate))
+        cache = self._db_short
+        f = self.fe.compute(hist[None, :], cache.pop(end - self.cfg.delta_samples, None))
+        cache[end] = f.db_short
+        if len(cache) > 2 * (self.cfg.delta_samples // self.cfg.hop) + 2:  # frames were skipped: forget stale ones
+            for k in [k for k in cache if k <= end - self.cfg.delta_samples]:
+                del cache[k]
         pr = self.model.predict_one(f.x[0])
         return self.dec.step(t, pr[0], pr[1], f.mag_long[0], float(f.rms_db[0]))
 

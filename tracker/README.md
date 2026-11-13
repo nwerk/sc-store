@@ -36,7 +36,8 @@ s.waitForBoot {
 
 `~polyTrackerNew` options (all optional): `inChan`, `freqBus`/`ampBus`/`lagAmpBus`/`trigBus` (Bus objects, else
 allocated), `target`/`addAction`, `synthArgs` (extra `\polyTracker` args such as `[\holdLast, 1]`), `jackPort`
-(default `system:capture_<inChan+1>`), `python`, `model`, `monoMode`, `cpu` (pin to a core), `rtPriority`,
+(default `system:capture_<inChan+1>`), `python`, `model`, `monoMode`, `hop` (`\auto` = default, `256`, `512`),
+`cpu` (pin to a core), `rtPriority`,
 `decoderArgs` (extra command line, e.g. `"--hop 512 --no-refine"`), `autoLaunch`, `verbose`.
 The Python process is started and supervised by sclang (it exits by itself when sclang dies, and when
 `~tracker.run(false)` is set it idles). On Windows `autoLaunch` is off: start `python -m polytracker run`
@@ -66,10 +67,14 @@ back to the nominal semitone frequency otherwise (dense chords).
 # workstation (inference + training)
 ./scripts/install.sh --train
 # Raspberry Pi: reuse the apt numpy, only add JACK-Client
-sudo apt install python3-numpy python3-venv libjack-jackd2-0
+sudo apt install python3-numpy python3-venv libjack-jackd2-0 libopenblas0-pthread
 ./scripts/install.sh
 .venv/bin/python -m polytracker bench       # per-frame cost on THIS machine
 ```
+
+`libopenblas0-pthread` matters: Debian's `python3-numpy` is satisfied by the unoptimised reference BLAS
+(`libblas3`), on which the network runs several times slower. `install.sh`, `bench` and `run` check which BLAS
+numpy loaded and print a warning if it is the reference one.
 
 `.venv/bin/python` inside `tracker/` is picked up automatically by `inputtracker.scd`.
 For real-time scheduling the user needs an `rtprio` limit (the pisound image already grants this to `@audio`);
@@ -125,22 +130,30 @@ note.
 
 ### CPU
 
-Measured on the development laptop (x86-64, one thread, `python -m polytracker bench`):
+Measured on the development laptop (x86-64, one thread, `python -m polytracker bench`, all six voices sounding):
 
-| hop | budget | mean per frame | share of one core |
-|---|---|---|---|
-| 256 (default, 5.3 ms) | 5.33 ms | 0.67 ms (p99 1.5 ms) | 13 % |
-| 512 (10.7 ms) | 10.67 ms | 0.70 ms | 7 % |
+| hop | budget | mean per frame | p99 | share of one core |
+|---|---|---|---|---|
+| 256 (default, 5.3 ms) | 5.33 ms | 0.47 ms | 0.67 ms | 9 % |
+| 512 (10.7 ms) | 10.67 ms | 0.50 ms | 0.82 ms | 5 % |
 
-Live test through JACK with a guitar recording (6 voices at peak): 20–25 % of one core, worst frame 2.4 ms,
-no dropped frames. Per frame on an idle machine: ~40 % feature frontend (FFTs of 4096/1024/2048 samples), ~33 %
-network, ~26 % decoder (0.26 / 0.22 / 0.17 ms with ~4 notes sounding).
+Live through JACK with 40 s of synthetic polyphony (up to 4 notes, bends, vibrato): 13–17 % of one core, worst
+frame ≤ 3.4 ms, no dropped frames, and the same 203 notes as the offline run. Per frame: frontend ~0.15 ms (two
+thirds of it FFTs), network ~0.17 ms, decoder ~0.1 ms with four notes sounding.
+
+The realtime path avoids repeated work without changing a single output value (checked bit for bit against the
+previous version on numpy 1.24 and 2.5, and in `tests/test_perf.py`): the short spectrum a frame compares
+against for the onset channel is the one computed four frames earlier and is reused, the network's
+single-frame path has every buffer and view precomputed and writes each layer straight into the next one's
+input, and the decoder handles all voices with array operations instead of per-note Python loops.
 
 **Raspberry Pi 4 numbers were not measured** (no Pi was available during development). A Cortex-A72 core is
-several times slower than a laptop core for this kind of numpy code, so expect somewhere between 40 % and 90 %
-of the budget at hop 256. Run `bench` on the Pi first. If the mean is above ~50 % of the budget:
-`decoderArgs: "--hop 512"` (halves the cost, costs at most 5 ms more latency), `--no-refine`, `cpu: 3` (pin to
-an otherwise idle core), `--voices 4`.
+several times slower than a laptop core for this kind of numpy code, so expect roughly 30–60 % of the budget at
+hop 256. To make sure it fits anyway, `run` uses **`--hop auto`** by default: at startup it measures one second
+of six-voice audio at hop 256, keeps it if the mean stays under 45 % and the 99th percentile under 80 % of the
+budget, and otherwise switches to hop 512 (half the CPU, at most 5.3 ms more latency). The choice is printed
+(`auto hop: ...`). Force a value with `hop: 256` / `hop: 512` in `~polyTrackerNew` or `--hop` on the command
+line. If even hop 512 is tight: `--no-refine`, `cpu: 3` (an otherwise idle core), `--voices 4`.
 `python -m polytracker run -v` prints the real load every second; the tracker skips ahead instead of falling
 behind (`dropped` in the stats).
 
@@ -162,7 +175,7 @@ behind (`dropped` in the stats).
 * **Refiner** (`refine.py`): per note, the long-window spectrum is searched around each of the first harmonics
   (excluding those that coincide with another active note), parabolic interpolation, inharmonicity
   correction, weighted-median agreement of the votes. Costs ~0.025 ms per note and is throttled to every 12 ms.
-* **Runtime** (`realtime.py`): JACK callback only copies into a ring buffer; analysis runs in its own
+* **Runtime** (`realtime.py`, `perf.py`): hop chosen by a startup measurement; JACK callback only copies into a ring buffer; analysis runs in its own
   (optionally SCHED_FIFO, pinned) thread of the process; GC is frozen; stats and heartbeats go to sclang once a
   second; SIGTERM when the parent dies.
 
@@ -184,8 +197,9 @@ The frontend settings live in `config.py` and are stored in the model file; chan
 ```bash
 python -m polytracker wav song.wav                 # note list, offline
 python -m polytracker wav song.wav --realtime --bus 10     # through the real-time loop, writes to scsynth
-python -m polytracker run --input system:capture_1 --bus 10 -v   # what sclang starts
-python -m polytracker info | bench
+python -m polytracker run --input system:capture_1 --bus 10 -v   # what sclang starts (--hop auto by default)
+python -m polytracker bench                        # cost per frame at hop 256 and 512, BLAS check
+python -m polytracker info
 scripts/jack_play.py song.wav --connect polytracker:in     # simulate a guitar on JACK
 ```
 

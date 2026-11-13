@@ -27,24 +27,44 @@ class PitchRefiner:
         self.collision_bins = collision_bins  # harmonics closer than this to another note's harmonics are ignored
         self.agree_cents = agree_cents  # harmonic votes further than this from the weighted median are discarded
         self.nyq_limit = 0.45 * self.sr
+        # harmonic number and stiffness stretch, precomputed: f_h = f0 * h * stretch_h
+        self._h = np.arange(1, 17, dtype=np.float64)
+        self._stretch = np.sqrt(1.0 + INHARMONICITY * self._h * self._h)
+        self._bl_off = np.arange(-1, 2)  # band_level looks at the nearest bin and its two neighbours
 
-    def _harmonics(self, f0: float, count: int):
-        h = np.arange(1, count + 1)
-        return f0 * h * np.sqrt(1.0 + INHARMONICITY * h * h)
+    def _harmonics(self, f0, count: int):
+        """Stretched harmonic frequencies; ``f0`` may be a scalar or an array (one row per f0)."""
+        f0 = np.asarray(f0, dtype=np.float64)
+        return f0[..., None] * self._h[:count] * self._stretch[:count] if f0.ndim else f0 * self._h[:count] * self._stretch[:count]
 
-    def refine(self, mag: np.ndarray, f_guess: float, others: list[float]) -> tuple[float | None, float]:
-        """Returns ``(refined_f0 or None, level)``; level is the RMS magnitude of the used harmonics."""
+    def collision_harmonics(self, f0s) -> np.ndarray:
+        """Harmonics of other sounding notes that ``refine`` avoids, ``[len(f0s), 10]``."""
+        return self._harmonics(np.asarray(f0s, dtype=np.float64).reshape(-1), 10)
+
+    def refine(self, mag: np.ndarray, f_guess: float, others, other_h: np.ndarray | None = None) -> tuple[float | None, float]:
+        """Returns ``(refined_f0 or None, level)``; level is the RMS magnitude of the used harmonics.
+
+        ``others``: frequencies of the other sounding notes. ``other_h`` (their ``collision_harmonics``) may be
+        passed instead to avoid recomputing them for every note of a frame.
+        """
         bin_hz = self.bin_hz
         n_bins = len(mag)
         harm = self._harmonics(f_guess, self.max_h)
-        other_h = np.concatenate([self._harmonics(o, 10) for o in others]) if others else np.empty(0)
+        if other_h is None:
+            other_h = self.collision_harmonics(others).ravel() if len(others) else np.empty(0)
+        else:
+            other_h = other_h.ravel()
         spacing_bins = f_guess / bin_hz
+        if other_h.size:  # harmonics that sit on a partial of another sounding note
+            collides = (np.abs(other_h[:, None] - harm[None, :]).min(axis=0) < self.collision_bins * bin_hz).tolist()
+        else:
+            collides = [False] * len(harm)
         votes = []
         level_sq = 0.0
-        for h, exp_f in enumerate(harm, start=1):
+        for h, exp_f in enumerate(harm.tolist(), start=1):
             if exp_f > self.nyq_limit or exp_f > 7000.0:
                 break
-            if other_h.size and np.min(np.abs(other_h - exp_f)) < self.collision_bins * bin_hz:
+            if collides[h - 1]:
                 continue
             dev_bins = exp_f * (2.0 ** (self.max_dev / 1200.0) - 1.0) / bin_hz
             hw = max(1.5, min(dev_bins, 0.42 * spacing_bins))
@@ -80,6 +100,17 @@ class PitchRefiner:
             return None, 0.0
         level_sq = sum(v[2] ** 2 for v, k in zip(votes, keep) if k)
         return f0, math.sqrt(level_sq / keep.sum())
+
+    def band_levels(self, mag: np.ndarray, f0s, harmonics: int = 4) -> np.ndarray:
+        """Vectorised :meth:`band_level` for several fundamentals at once (same numbers)."""
+        f0s = np.asarray(f0s, dtype=np.float64).reshape(-1)
+        k = np.rint(self._harmonics(f0s, harmonics) / self.bin_hz).astype(np.int64)  # [V, H]
+        valid = np.cumprod(k + 2 < len(mag), axis=1).astype(bool)  # band_level stops at the first harmonic out of range
+        idx = np.clip(k[..., None] + self._bl_off, 0, len(mag) - 1)
+        peak = mag[idx].max(axis=2).astype(np.float64)
+        acc = np.where(valid, peak * peak, 0.0).sum(axis=1)
+        n = valid.sum(axis=1)
+        return np.where(n > 0, np.sqrt(acc / np.maximum(n, 1)), 0.0)
 
     def band_level(self, mag: np.ndarray, f0: float, harmonics: int = 4) -> float:
         """RMS magnitude of the strongest bin around the first few harmonics (full-scale sine == 1)."""

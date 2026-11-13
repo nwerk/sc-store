@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 
 import numpy as np
 
@@ -12,6 +11,7 @@ from .decoder import DecoderParams
 from .engine import DEFAULT_MODEL, Tracker
 from .net import PitchNetNP
 from .outputs import MONO_MODES, OscOutput
+from .perf import blas_warning, choose_hop, measure, summary
 from .realtime import Runner, die_with_parent, set_realtime
 
 
@@ -33,6 +33,15 @@ def _add_decoder_args(ap):
     g.add_argument("--no-refine", action="store_true", help="report nominal semitone frequencies only")
 
 
+def _hop(s: str):
+    if s == "auto":
+        return s
+    try:
+        return int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError("--hop takes a number of samples or 'auto'")
+
+
 def _params(a) -> DecoderParams:
     return DecoderParams(on_thresh=a.on, off_thresh=a.off, onset_thresh=a.onset, gate_db=a.gate_db,
                          max_voices=a.voices, refine=not a.no_refine)
@@ -43,7 +52,13 @@ def cmd_run(a):
     from .audio import JackSource
 
     src = JackSource(a.input, a.client_name)
-    tracker = Tracker.load(a.model, params=_params(a), sample_rate=src.sample_rate, hop=a.hop)
+    w = blas_warning()
+    if w:
+        print(f"[polytracker] warning: {w}", flush=True)
+    set_realtime(a.rt_priority, a.cpu)  # before measuring, so the choice reflects the real scheduling
+    model = PitchNetNP.load(a.model)
+    load = lambda hop: Tracker(model, params=_params(a), sample_rate=src.sample_rate, hop=hop)
+    tracker = choose_hop(load, log=lambda m: print(m, flush=True)) if a.hop == "auto" else load(a.hop)
     if src.sample_rate != tracker.model.cfg.sample_rate:
         print(f"[polytracker] warning: JACK runs at {src.sample_rate} Hz, model was trained at "
               f"{tracker.model.cfg.sample_rate} Hz (windows are rescaled)", flush=True)
@@ -52,7 +67,6 @@ def cmd_run(a):
         if a.bus is None:
             sys.exit("--bus (first control bus of the tracker block) is required unless --no-osc")
         out = OscOutput(_hostport(a.scsynth), _hostport(a.lang), a.bus, a.voices, a.mono_mode)
-    set_realtime(a.rt_priority, a.cpu)
     Runner(tracker, src, out, a.control_port, a.parent_pid, verbose=a.verbose).run()
 
 
@@ -80,25 +94,15 @@ def cmd_wav(a):
 
 
 def cmd_bench(a):
-    tracker = Tracker.load(a.model, params=_params(a), sample_rate=a.sample_rate, hop=a.hop)
-    cfg = tracker.cfg
-    rng = np.random.default_rng(0)
-    t = np.arange(cfg.sample_rate * 4) / cfg.sample_rate
-    x = sum(0.1 * np.sin(2 * np.pi * f * h * t) / h for f in (110.0, 164.8, 220.0, 330.0) for h in range(1, 9))
-    x = (x + 0.002 * rng.standard_normal(len(t))).astype(np.float32)
-    hist = tracker.fe.pad(x)
-    n = (len(x) - cfg.hop) // cfg.hop
-    times = []
-    for i in range(n):
-        end = (i + 1) * cfg.hop
-        h = hist[end:end + cfg.history]
-        t0 = time.perf_counter()
-        tracker.process(h, end / cfg.sample_rate)
-        times.append(time.perf_counter() - t0)
-    ms = np.array(times[20:]) * 1e3
-    budget = 1e3 * cfg.hop / cfg.sample_rate
-    print(f"hop {cfg.hop} ({budget:.2f} ms budget): mean {ms.mean():.3f} ms  p50 {np.percentile(ms, 50):.3f}  "
-          f"p99 {np.percentile(ms, 99):.3f}  max {ms.max():.3f}  -> {100 * ms.mean() / budget:.1f}% of one core")
+    print(f"numpy {np.__version__}")
+    w = blas_warning()
+    if w:
+        print(f"warning: {w}")
+    model = PitchNetNP.load(a.model)
+    for hop in ([a.hop] if a.hop else [256, 512]):
+        tracker = Tracker(model, params=_params(a), sample_rate=a.sample_rate, hop=hop)
+        print(summary(tracker, measure(tracker, a.seconds)))
+    print("(six voices sounding; `run --hop auto` picks the smallest hop with mean <= 45% and p99 <= 80% of it)")
 
 
 def cmd_info(a):
@@ -116,7 +120,9 @@ def main(argv=None):
     r.add_argument("--input", default="system:capture_1", help="JACK port to listen to")
     r.add_argument("--client-name", default="polytracker")
     r.add_argument("--model", default=str(DEFAULT_MODEL))
-    r.add_argument("--hop", type=int, default=None, help="samples between analysis frames (default: model's, 256)")
+    r.add_argument("--hop", type=_hop, default="auto",
+                   help="samples between analysis frames: 256 (5.3 ms), 512, or 'auto' (default: measure this "
+                        "machine at startup and take 256 if it keeps up comfortably, else 512)")
     r.add_argument("--scsynth", default="127.0.0.1:57110", help="scsynth UDP address (bus writes)")
     r.add_argument("--lang", default="127.0.0.1:57120", help="sclang UDP address (note events)")
     r.add_argument("--bus", type=int, help="index of the first control bus of the tracker block")
@@ -145,8 +151,9 @@ def main(argv=None):
 
     b = sub.add_parser("bench", help="per-frame CPU cost on this machine")
     b.add_argument("--model", default=str(DEFAULT_MODEL))
-    b.add_argument("--hop", type=int, default=None)
+    b.add_argument("--hop", type=int, default=None, help="default: measure 256 and 512")
     b.add_argument("--sample-rate", type=int, default=48000)
+    b.add_argument("--seconds", type=float, default=4.0, help="length of the test signal")
     _add_decoder_args(b)
     b.set_defaults(fn=cmd_bench)
 
@@ -155,7 +162,10 @@ def main(argv=None):
     i.set_defaults(fn=cmd_info)
 
     a = ap.parse_args(argv)
-    a.fn(a)
+    try:
+        a.fn(a)
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

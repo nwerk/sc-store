@@ -71,6 +71,7 @@ class Decoder:
         self.below_since = np.full(n, np.nan)
         self.armed = np.ones(n, dtype=bool)
         self.est_freq = self.nominal_hz.copy()
+        self.est_harm = self.refiner.collision_harmonics(self.est_freq)  # [n_pitch, 10], kept in sync with est_freq
         self.t_refined = np.full(n, -1e9)
         self.v_pitch = np.full(v, -1, dtype=np.int64)  # pitch index per voice
         self.v_midi = np.full(v, -1, dtype=np.int64)
@@ -89,15 +90,19 @@ class Decoder:
             return -2 - weakest  # signal: steal this voice
         return -1
 
-    def _level(self, mag, f0):
-        if mag is None:
-            return 0.0
-        return self.refiner.band_level(mag, f0)
+    def _set_freq(self, p, f):
+        self.est_freq[p] = f
+        self.est_harm[p] = self.refiner.collision_harmonics(f)[0]
 
-    def _to_amp(self, level):
-        if level <= 0.0:
-            return 0.0
-        return float(np.clip(1.0 + 20.0 * math.log10(level) / self.p.amp_range_db, 0.0, 1.0))
+    def _amps(self, mag, f0s) -> np.ndarray:
+        """Voice amplitude 0..1 from the spectrum level around the first harmonics of each ``f0``."""
+        f0s = np.asarray(f0s, dtype=np.float64)
+        if mag is None or not f0s.size:
+            return np.zeros(f0s.size)
+        level = self.refiner.band_levels(mag, f0s)
+        with np.errstate(divide="ignore"):
+            db = 20.0 * np.log10(level)
+        return np.where(level > 0.0, np.clip(1.0 + db / self.p.amp_range_db, 0.0, 1.0), 0.0)
 
     def _start(self, p, t, pf, mag, events, voice=None):
         v = voice if voice is not None else self._free_voice(pf, p)
@@ -112,19 +117,19 @@ class Decoder:
         self.above_since[p] = np.nan
         self.below_since[p] = np.nan
         self.armed[p] = False
-        self.est_freq[p] = self.nominal_hz[p]
+        self._set_freq(p, self.nominal_hz[p])
         self.t_refined[p] = t
         self.v_pitch[v] = p
         self.v_midi[v] = self.cfg.pitch_lo + p
         self.v_t_on[v] = t
         f = self.nominal_hz[p]
         if self.p.refine and mag is not None:
-            fr, _ = self.refiner.refine(mag, f, self._others(p))
+            fr, _ = self.refiner.refine(mag, f, None, self._others_h(p))
             if fr is not None:
                 f = fr
-                self.est_freq[p] = fr
+                self._set_freq(p, fr)
         self.v_freq[v] = f
-        self.v_amp[v] = self._to_amp(self._level(mag, f))
+        self.v_amp[v] = self._amps(mag, [f])[0]
         events.append(NoteEvent("on", t, v, int(self.v_midi[v]), float(f), float(self.v_amp[v])))
 
     def _stop(self, p, t, events):
@@ -138,8 +143,11 @@ class Decoder:
         self.v_pitch[v] = -1
         self.v_amp[v] = 0.0  # frequency stays as the last value for release tails
 
-    def _others(self, p):
-        return [float(self.est_freq[q]) for q in np.flatnonzero(self.active) if q != p]
+    def _others_h(self, p):
+        """Harmonics of every sounding note except ``p`` (what refinement must not lock onto)."""
+        m = self.active.copy()
+        m[p] = False
+        return self.est_harm[m]
 
     # ------------------------------------------------------------------ main step
     def step(self, t: float, p_frame: np.ndarray, p_onset: np.ndarray, mag: np.ndarray | None = None,
@@ -176,8 +184,7 @@ class Decoder:
                 self.above_since[p] = t
             if fast or t - self.above_since[p] >= on_s:
                 self._start(int(p), t, p_frame, mag, events)
-        for p in np.flatnonzero(~self.active & ~wanted):
-            self.above_since[p] = np.nan
+        self.above_since[~self.active & ~wanted] = np.nan
 
         self._track(t, mag)
         return events
@@ -185,18 +192,21 @@ class Decoder:
     def _track(self, t, mag):
         """Refresh frequency/amplitude of the sounding voices (frequency refinement is throttled to save CPU)."""
         refine_s = self.p.refine_every_ms / 1e3
-        for p in np.flatnonzero(self.active):
-            v = int(self.voice_of[p])
-            f = self.est_freq[p]
-            if self.p.refine and mag is not None and t - self.t_refined[p] >= refine_s:
+        act = np.flatnonzero(self.active)
+        if not act.size:
+            return
+        if self.p.refine and mag is not None:
+            for p in act[t - self.t_refined[act] >= refine_s]:
+                p = int(p)
                 self.t_refined[p] = t
-                fr, _ = self.refiner.refine(mag, float(f), self._others(int(p)))
+                f = self.est_freq[p]
+                fr, _ = self.refiner.refine(mag, float(f), None, self._others_h(p))
                 if fr is not None and abs(1200.0 * math.log2(fr / f)) < 40.0:  # real pitch moves are smooth
                     a = self.p.glide_alpha
-                    f = (1.0 - a) * f + a * fr
-                    self.est_freq[p] = f
-            self.v_freq[v] = f
-            self.v_amp[v] = self._to_amp(self._level(mag, float(f)))
+                    self._set_freq(p, (1.0 - a) * f + a * fr)
+        vs = self.voice_of[act]
+        self.v_freq[vs] = self.est_freq[act]
+        self.v_amp[vs] = self._amps(mag, self.est_freq[act])
 
     def voices(self) -> VoiceState:
         return VoiceState(active=self.v_pitch >= 0, midi=self.v_midi.copy(), freq=self.v_freq.copy(),

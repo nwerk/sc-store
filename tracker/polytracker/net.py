@@ -64,44 +64,60 @@ class PitchNetNP:
         logits = self.forward(x)
         return 1.0 / (1.0 + np.exp(-np.clip(logits, -30.0, 30.0)))
 
-    # ---- realtime path: one frame, preallocated buffers, no per-call allocation in the conv loop
+    # ---- realtime path: one frame, preallocated buffers, no allocation and no slicing per call
     def _plan(self, l_in: int):
-        plan = []
+        """Build the per-layer buffers and every view the single-frame path needs, once.
+
+        Each layer's output is written straight into the interior of the next layer's zero-padded input
+        buffer, and the im2col copies are precomputed (destination, source) view pairs, so a frame costs one
+        ``copyto`` per tap plus matmul / bias / ReLU / residual per layer.
+        """
+        layers = []
         cin = self.cfg.n_channels
         for i, l in enumerate(self.layers):
             k, s, d, p = l["k"], l["stride"], l["dilation"], l["pad"]
             l_out = (l_in + 2 * p - d * (k - 1) - 1) // s + 1
-            cout = self.w[i].shape[0]
-            plan.append(dict(
-                k=k, s=s, d=d, p=p, cin=cin, l_in=l_in, l_out=l_out, relu=l.get("relu", True),
-                res_in=bool(l.get("residual_in")), res_out=bool(l.get("residual_out")),
-                xpad=np.zeros((cin, l_in + 2 * p), dtype=np.float32),
-                col=np.empty((k * cin, l_out), dtype=np.float32),
-                out=np.empty((cout, l_out), dtype=np.float32),
-                w=self.w[i], b=self.b[i][:, None]))
-            cin, l_in = cout, l_out
-        self._plan_cache = plan
-        return plan
+            xpad = np.zeros((cin, l_in + 2 * p), dtype=np.float32)
+            col = np.empty((k * cin, l_out), dtype=np.float32)
+            span = (l_out - 1) * s + 1
+            taps = [(col[t * cin:(t + 1) * cin], xpad[:, t * d: t * d + span: s]) for t in range(k)]
+            layers.append(dict(inp=xpad[:, p:p + l_in], taps=taps, col=col, w=self.w[i], b=self.b[i][:, None],
+                               relu=l.get("relu", True), res_in=bool(l.get("residual_in")),
+                               res_out=bool(l.get("residual_out")), shape=(self.w[i].shape[0], l_out)))
+            cin, l_in = self.w[i].shape[0], l_out
+        for a, b in zip(layers, layers[1:]):
+            a["out"] = b["inp"]  # BLAS writes into the strided interior view directly
+        layers[-1]["out"] = np.empty(layers[-1]["shape"], dtype=np.float32)
+        self._prob = np.empty(layers[-1]["shape"], dtype=np.float32)
+        self._plan_cache = layers
+        self._plan_len = layers[0]["inp"].shape[1]
+        return layers
 
     def predict_one(self, x: np.ndarray) -> np.ndarray:
-        """``x`` [C, n_fine] -> probabilities [2, n_pitch]; same numbers as ``predict`` but allocation-free."""
-        plan = getattr(self, "_plan_cache", None) or self._plan(x.shape[1])
-        h = x
+        """``x`` [C, n_fine] -> probabilities [2, n_pitch]; same numbers as ``predict`` but allocation-free.
+
+        The returned array is reused by the next call.
+        """
+        plan = self._plan_cache if getattr(self, "_plan_len", None) == x.shape[1] else self._plan(x.shape[1])
+        copyto, matmul, maximum = np.copyto, np.matmul, np.maximum
+        copyto(plan[0]["inp"], x)
         skip = None
         for L in plan:
             if L["res_in"]:
-                skip = h
-            xp, col, k, cin = L["xpad"], L["col"], L["k"], L["cin"]
-            xp[:, L["p"]:L["p"] + L["l_in"]] = h
-            span = (L["l_out"] - 1) * L["s"] + 1
-            for i in range(k):
-                col[i * cin:(i + 1) * cin] = xp[:, i * L["d"]: i * L["d"] + span: L["s"]]
+                skip = L["inp"]
+            for dst, src in L["taps"]:
+                copyto(dst, src)
             out = L["out"]
-            np.matmul(L["w"], col, out=out)
+            matmul(L["w"], L["col"], out=out)
             out += L["b"]
             if L["relu"]:
-                np.maximum(out, 0.0, out=out)
+                maximum(out, 0.0, out=out)
             if L["res_out"]:
                 out += skip
-            h = out
-        return 1.0 / (1.0 + np.exp(-np.clip(h, -30.0, 30.0)))
+        p = self._prob
+        np.clip(out, -30.0, 30.0, out=p)
+        np.negative(p, out=p)
+        np.exp(p, out=p)
+        p += 1.0
+        np.reciprocal(p, out=p)
+        return p

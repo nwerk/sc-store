@@ -64,6 +64,7 @@ class Features:
     x: np.ndarray  # [B, C, n_fine] network input
     mag_long: np.ndarray  # [B, n_fft_long//2+1] linear magnitude, full-scale sine == 1.0
     rms_db: np.ndarray  # [B] RMS level of the long window in dBFS
+    db_short: np.ndarray | None = None  # [B, n_grid] short-window log spectrum (lets the next frames skip one FFT)
 
 
 class Frontend:
@@ -106,8 +107,12 @@ class Frontend:
 
         self.coord = (j / (cfg.n_fine - 1)).astype(np.float32)
 
-    def compute(self, hist: np.ndarray) -> Features:
-        """``hist``: ``[B, history]`` float32, newest sample last."""
+    def compute(self, hist: np.ndarray, db_prev: np.ndarray | None = None) -> Features:
+        """``hist``: ``[B, history]`` float32, newest sample last.
+
+        ``db_prev``: the ``db_short`` of the frame that ended ``delta_samples`` earlier, if known. It is exactly
+        what this call would compute for the spectral-change channel, so passing it only saves time.
+        """
         cfg = self.cfg
         hist = np.ascontiguousarray(hist, dtype=np.float32)
         B = hist.shape[0]
@@ -116,13 +121,13 @@ class Frontend:
         long_seg = hist[:, -self.n_long:]
         mag_long = np.abs(np.fft.rfft(long_seg * self.w_long, axis=1)).astype(np.float32) * self.norm_long
         short_now = hist[:, -self.n_short:]
-        short_prev = hist[:, -(self.n_short + self.delta):-self.delta]
         mag_s = np.abs(np.fft.rfft(short_now * self.w_short, axis=1)).astype(np.float32) * self.norm_short
-        mag_p = np.abs(np.fft.rfft(short_prev * self.w_short, axis=1)).astype(np.float32) * self.norm_short
-
         db_long = 20.0 * np.log10(self.fb_long(mag_long) + 1e-7)
         db_short = 20.0 * np.log10(self.fb_short(mag_s) + 1e-7)
-        db_prev = 20.0 * np.log10(self.fb_short(mag_p) + 1e-7)
+        if db_prev is None:
+            short_prev = hist[:, -(self.n_short + self.delta):-self.delta]
+            mag_p = np.abs(np.fft.rfft(short_prev * self.w_short, axis=1)).astype(np.float32) * self.norm_short
+            db_prev = 20.0 * np.log10(self.fb_short(mag_p) + 1e-7)
 
         ref_l = np.maximum(db_long.max(axis=1, keepdims=True), cfg.db_floor)
         ref_s = np.maximum(db_short.max(axis=1, keepdims=True), cfg.db_floor)
@@ -152,7 +157,7 @@ class Frontend:
         c += cfg.acf_multiples
         x[:, c:c + 2] = lvl[:, :, None]
         x[:, c + 2] = self.coord[None, :]
-        return Features(x=x, mag_long=mag_long, rms_db=rms_db.astype(np.float32))
+        return Features(x=x, mag_long=mag_long, rms_db=rms_db.astype(np.float32), db_short=db_short)
 
     def pad(self, signal: np.ndarray) -> np.ndarray:
         return np.concatenate([np.zeros(self.history, dtype=np.float32), np.asarray(signal, dtype=np.float32)])
