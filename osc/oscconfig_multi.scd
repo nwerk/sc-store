@@ -4,8 +4,9 @@
 // Requires: ~oscMap, ~busToOsc        (osc_mappings_multi.scd)
 //           ~ccBuses, ~busNames       (midiconfig_multi.scd)
 //           ~rec, ~g, ~ptr, b        (main_multi.scd)
-//           ~grainMaster, ~tapeMaster (main_multi.scd)
-//           ~synthEnabled, ~focusedSynth (main_multi.scd)
+//           ~grainMaster, ~tapeMaster, ~cembaloMaster (main_multi.scd)
+//           ~synthEnabled, ~grainSrc, ~focusedSynth, ~updateChains,
+//           ~setCembaloParam, ~cembaloSpecs (main_multi.scd)
 //
 // Loaded INSIDE s.waitForBoot in main_multi.scd, after synth
 // instantiation so all synth handles are available.
@@ -72,10 +73,19 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 };
 
 // ---- Synth focus feedback ----
-// Sends /synth/grain/focused and /synth/tape/focused back to TouchOSC.
+// Sends /synth/<name>/focused back to TouchOSC.
 ~sendFocusFeedback = {
-	~sendToTouchOSC.('/synth/grain/focused', (~focusedSynth == \grain).asInteger.asFloat);
-	~sendToTouchOSC.('/synth/tape/focused',  (~focusedSynth == \tape).asInteger.asFloat);
+	[\grain, \tape, \cembalo].do { |name|
+		~sendToTouchOSC.("/synth/" ++ name ++ "/focused", (~focusedSynth == name).asInteger.asFloat);
+	};
+};
+
+// Grain input source toggles: ~grainSrc key → OSC address
+~grainSrcAddr = ( guitar: "/grain/srcGuitar", cembalo: "/grain/srcCembalo", tape: "/grain/srcTape" );
+~sendGrainSrcFeedback = {
+	~grainSrcAddr.keysValuesDo { |name, addr|
+		~sendToTouchOSC.(addr, ~grainSrc[name].asInteger.asFloat);
+	};
 };
 
 // ---- Send all fader + toggle state to TouchOSC (boot sync / preset load) ----
@@ -104,7 +114,9 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	// Synth enable/focus state
 	~sendToTouchOSC.('/synth/grain/enable', ~synthEnabled[\grain].asInteger.asFloat);
 	~sendToTouchOSC.('/synth/tape/enable',  ~synthEnabled[\tape].asInteger.asFloat);
+	~sendToTouchOSC.('/synth/cembalo/enable', ~synthEnabled[\cembalo].asInteger.asFloat);
 	~sendFocusFeedback.();
+	~sendGrainSrcFeedback.();
 
 	// Preset slot indicators
 	~sendPresetSlots.();
@@ -122,6 +134,25 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 			~sendToTouchOSC.(addr, val);
 		}, addr.asString);
 	};
+};
+
+// ---- Cembalo faders: override the generic handler (the cembalo's parameters live in sclang) ----
+~cembaloSpecs.keysDo { |key|
+	var addr = "/cembalo/" ++ key;
+	OSCdef(addr.asSymbol, { |msg| ~setCembaloParam.(key, msg[1]) }, addr);
+};
+
+// ---- Grain input sources: guitar / cembalo / tape synth, any combination ----
+// Latching buttons in TouchOSC: the value is the new state. A source that is not audible on its own
+// (cembalo / tape enable off) is started anyway while it feeds the grains.
+~grainSrcAddr.keysValuesDo { |name, addr|
+	OSCdef(addr.asSymbol, { |msg|
+		var on = msg[1] >= 0.5;
+		~grainSrc[name] = on;
+		~updateChains.();
+		~sendToTouchOSC.(addr, on.asInteger.asFloat);
+		("Grain input " ++ name ++ ": " ++ if(on, "ON", "OFF")).postln;
+	}, addr);
 };
 
 // ---- Density fader: echo raw value + send scaled Hz to label ----
@@ -324,31 +355,32 @@ OSCdef('/synth/grain/enable', { |msg|
 OSCdef('/synth/tape/enable', { |msg|
 	var on = msg[1] >= 0.5;
 	~synthEnabled[\tape] = on;
+	// Starts / fades in, or fades out and pauses (unless the tape synth still feeds the grains)
+	~updateChains.();
 	if (on) {
-		// Resume tape chain, then fade amp in
-		~tartini !? { ~tartini.run(true) };
-		~ape !? { ~ape.run(true) };
-		~tapeMaster !? { ~tapeMaster.run(true); ~tapeMaster.set(\amp, 1.0) };
 		~focusedSynth = \tape;
 		~sendFocusFeedback.();
-	} {
-		// Fade out first (100 ms lag on \tapeOutput), then pause
-		~tapeMaster !? { ~tapeMaster.set(\amp, 0.0) };
-		AppClock.sched(0.2, {
-			~ape !? { ~ape.run(false) };
-			~tartini !? { ~tartini.run(false) };
-			~tapeMaster !? { ~tapeMaster.run(false) };
-			nil;
-		});
 	};
 	~sendToTouchOSC.('/synth/tape/enable', on.asInteger.asFloat);
 	("Tape: " ++ if(on, "ENABLED", "DISABLED")).postln;
 }, "/synth/tape/enable");
 
+OSCdef('/synth/cembalo/enable', { |msg|
+	var on = msg[1] >= 0.5;
+	~synthEnabled[\cembalo] = on;
+	~updateChains.();
+	if (on) {
+		~focusedSynth = \cembalo;
+		~sendFocusFeedback.();
+	};
+	~sendToTouchOSC.('/synth/cembalo/enable', on.asInteger.asFloat);
+	("Cembalo: " ++ if(on, "ENABLED", "DISABLED")).postln;
+}, "/synth/cembalo/enable");
+
 // ---- Synth focus (MIDI expression pedal routing) ----
 OSCdef('/synth/focus', { |msg|
 	var name = msg[1].asSymbol;
-	if (#[\grain, \tape].includes(name)) {
+	if (#[\grain, \tape, \cembalo].includes(name)) {
 		~focusedSynth = name;
 		~sendFocusFeedback.();
 		("Focused synth: " ++ name).postln;

@@ -61,6 +61,8 @@ SynthDef.new(\rec, {
 	startXSig = BufRd.ar(1, buf, endIdx, 1, 2) * (1 - w) + sig * w;
 	// only apply in head region; elsewhere write the normal signal
 	writeSig = Select.ar(ptr < xfadeSamples, [sig, startXSig]);
+	// never write NaN / inf into the buffer: once there, every grain reading it would stay broken
+	writeSig = Sanitize.ar(writeSig);
 
 	BufWr.ar(writeSig, buf, ptr);
 }).add;

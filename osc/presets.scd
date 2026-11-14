@@ -87,6 +87,9 @@ if (File.exists(~presetDir).not) {
 		// Apply master volume to synth arg directly (CC bus read alone is not enough)
 		~setMasterVol.(data[\faders][~busNames[\masterVol].index] ? 1.0);
 
+		// Parameters that are not read from the CC buses (main_multi.scd: the cembalo)
+		~onPresetFaders !? { ~onPresetFaders.(data[\faders]) };
+
 		// Restore toggle states
 		~recState      = data[\recState].asBoolean;
 		~liveMode      = data[\liveMode].asBoolean;
