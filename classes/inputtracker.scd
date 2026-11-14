@@ -1,7 +1,9 @@
 // Polyphonic guitar pitch tracker (replaces the old Tartini-based tracker).
 //
-// A small neural network runs in an external Python process (tracker/polytracker, numpy only, ~9 % of one
-// laptop core at a 5.3 ms hop; measure your Pi with `python -m polytracker bench`). At startup it measures the
+// A small neural network runs in an external process: the native C++ tracker (tracker/native, build it once with
+// `make -C tracker/native`) if it is built, else the Python one (tracker/polytracker, numpy only). Both give the
+// same notes; the native one needs about a third of the CPU (`tracker/native/build/polytracker bench` or
+// `python -m polytracker bench` measure this machine; `engine:` option). At startup it measures the
 // machine and picks a 5.3 ms hop, or 10.7 ms if the CPU cannot keep up comfortably (`hop:` option). It listens to
 // the guitar through its own JACK input and writes its results straight into a block of control buses on
 // scsynth (OSC /c_setn) - sclang is not in the audio path.
@@ -17,7 +19,7 @@
 //   ~tracker.onNoteOff = { |voice, midi| ... };
 //   In.kr(~tracker.voiceFreqBus.index, 6)   // all voice frequencies in a SynthDef
 //   ~tracker.set(\monoMode, \lowest);       // latest | lowest | highest | loudest (also: on, off, onset, gate_db, ...)
-//   ~tracker.run(false);  ~tracker.run(true) // pause / resume (also stops the Python analysis: no CPU)
+//   ~tracker.run(false);  ~tracker.run(true) // pause / resume (also stops the analysis process: no CPU)
 //   ~tracker.quit;                          // NOT .stop: Object:stop exists and would silently do nothing
 //
 // The tracker object is an Environment with know=true (not an Event: Event already defines .set/.stop/.synth).
@@ -86,7 +88,7 @@
 SynthDef(\polyTracker, ~polyTrackerGraph).add;
 SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, same arguments
 
-// ---- language-side part: buses, Python process, events ----
+// ---- language-side part: buses, tracker process, events ----
 ~polyTrackerNew = { |server, opts|
 	var t = Environment.new(know: true);  // not Event: Event already defines .set, .stop and .synth
 	var o = (
@@ -97,6 +99,7 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 		synthArgs: [],                       // extra \polyTracker args, e.g. [\holdLast, 1]
 		autoLaunch: (thisProcess.platform.name == \linux),
 		home: ~polyTrackerHome,              // tracker/ directory
+		engine: \auto,                       // \auto: native if tracker/native/build/polytracker exists, else Python; \native; \python
 		python: nil,                         // default: tracker/.venv/bin/python, then python3
 		model: nil,                          // default: tracker/models/guitar_v1.npz
 		jackPort: nil,                       // default: system:capture_<inChan+1>
@@ -116,7 +119,7 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 	t[\lastSeen] = 0;
 	t[\load] = 0;
 	t[\ownedBuses] = List.new;
-	t[\settings] = IdentityDictionary.new;  // replayed to the Python process when it reports ready (UDP sent earlier is lost)
+	t[\settings] = IdentityDictionary.new;  // replayed to the tracker process when it reports ready (UDP sent earlier is lost)
 
 	t[\voiceFreqBus] = { |self| Bus.new(\control, self[\block].index + ~polyTrackerHeader, ~polyTrackerVoices, self[\server]) };
 	t[\voiceAmpBus]  = { |self| Bus.new(\control, self[\block].index + ~polyTrackerHeader + ~polyTrackerVoices, ~polyTrackerVoices, self[\server]) };
@@ -128,22 +131,43 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 	t[\numActive]  = { |self| self[\held].size };
 	t[\heldNotes]  = { |self| self[\held].keys.asArray.sort.collect { |v| self[\held][v] } };
 
+	// \native or \python: what `engine` resolves to on this machine
+	t[\engine] = { |self|
+		var o = self[\opts], home = o[\home] ? "", bin = home +/+ "native/build/polytracker";
+		var model = (o[\model] ? (home +/+ "models/guitar_v1.npz")).splitext[0] ++ ".ptm";  // the native model file
+		var built = File.exists(bin) and: { File.exists(model) };
+		switch(o[\engine].asSymbol,
+			\python, { \python },
+			\native, {
+				if(built.not) { ("polyTracker: native tracker not built (" ++ bin ++ ", " ++ model ++ "), using Python; build it with: make -C tracker/native").warn };
+				if(built) { \native } { \python }
+			},
+			{ if(built) { \native } { \python } }
+		)
+	};
+
 	t[\command] = { |self|
 		var o = self[\opts], s = self[\server];
-		// Absolute paths: the command cd's into home before exec'ing python, so paths relative to sclang's working
-		// directory (e.g. after `sclang main_multi.scd`) would no longer resolve. No realpath on python: resolving
-		// the .venv/bin/python symlink would bypass the virtualenv.
+		// Absolute paths: the command cd's into home before exec'ing the tracker, so paths relative to sclang's
+		// working directory (e.g. after `sclang main_multi.scd`) would no longer resolve. No realpath on python:
+		// resolving the .venv/bin/python symlink would bypass the virtualenv.
 		var abs = { |p| if(p.notNil and: { p[0] != $/ } and: { p.contains("/") }) { File.getcwd +/+ p } { p } };
 		var home = abs.(o[\home]), py = abs.(o[\python] ? (home +/+ ".venv/bin/python"));
 		var cmd;
-		if(File.exists(py).not) { py = "python3" };
-		// -B: write no bytecode caches (__pycache__/*.pyc). A .pyc half-written at a power loss can make Python
-		// fail to start ("bad marshal data"); without caches nothing is written while the patch runs.
-		cmd = "cd % && exec % -B -m polytracker run --input % --scsynth 127.0.0.1:% --lang 127.0.0.1:% --bus % --voices % --control-port % --mono-mode % --parent-pid %".format(
-			home.shellQuote, py.shellQuote,
+		self[\engineUsed] = self[\engine].value(self);
+		if(self[\engineUsed] == \native) {
+			// same command line as the Python tracker; --model may name the .npz, the .ptm next to it is read
+			cmd = "cd % && exec % run".format(home.shellQuote, (home +/+ "native/build/polytracker").shellQuote);
+		} {
+			if(File.exists(py).not) { py = "python3" };
+			// -B: write no bytecode caches (__pycache__/*.pyc). A .pyc half-written at a power loss can make Python
+			// fail to start ("bad marshal data"); without caches nothing is written while the patch runs.
+			cmd = "cd % && exec % -B -m polytracker run".format(home.shellQuote, py.shellQuote);
+		};
+		cmd = cmd ++ " --input % --scsynth 127.0.0.1:% --lang 127.0.0.1:% --bus % --voices % --control-port % --mono-mode % --parent-pid %".format(
 			(o[\jackPort] ? ("system:capture_" ++ (o[\inChan] + 1))).shellQuote,
 			s.addr.port, NetAddr.langPort, self[\block].index, o[\voices], o[\controlPort], o[\monoMode], thisProcess.pid);
-		o[\model] !? { cmd = cmd ++ " --model " ++ o[\model].shellQuote };
+		o[\model] !? { cmd = cmd ++ " --model " ++ abs.(o[\model]).shellQuote };
 		o[\cpu] !? { cmd = cmd ++ " --cpu " ++ o[\cpu] };
 		cmd = cmd ++ " --rt-priority " ++ o[\rtPriority] ++ " --hop " ++ o[\hop];
 		if(o[\verbose]) { cmd = cmd ++ " --verbose" };
@@ -172,7 +196,7 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 		self
 	};
 
-	// Pause/resume like Synth.run: stops the audio-side synth and the Python analysis (saves CPU)
+	// Pause/resume like Synth.run: stops the audio-side synth and the tracker analysis (saves CPU)
 	t[\run] = { |self, flag = true|
 		self[\synth] !? { self[\synth].run(flag) };
 		if(self[\opts][\autoLaunch]) { self[\set].value(self, \pause, flag.not.binaryValue) };
@@ -220,8 +244,9 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 					"polyTracker: tracker/ directory not found - set the 'home' option".warn;
 				} {
 					self[\pid] = self[\command].value(self).unixCmd({ |code, pid|
-						if(me[\running]) { ("polyTracker: Python process exited with code " ++ code).warn };
+						if(me[\running]) { ("polyTracker: % tracker process exited with code %".format(me[\engineUsed], code)).warn };
 					}, true);
+					("polyTracker: starting the % tracker".format(self[\engineUsed])).postln;
 					self[\watchdog] = Routine({
 						loop {
 							1.0.wait;

@@ -77,6 +77,10 @@ sudo apt install python3-numpy python3-venv libjack-jackd2-0 libopenblas0-pthrea
 numpy loaded and print a warning if it is the reference one.
 
 `.venv/bin/python` inside `tracker/` is picked up automatically by `inputtracker.scd`.
+
+**Native tracker:** `make -C tracker/native` builds a C++ port of the realtime tracker (same notes, about a third
+of the CPU, no Python needed at runtime). `inputtracker.scd` uses it automatically once it is built. See
+[native/README.md](native/README.md).
 For real-time scheduling the user needs an `rtprio` limit (the pisound image already grants this to `@audio`);
 without it the tracker still runs, with a warning.
 
