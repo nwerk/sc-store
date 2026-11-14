@@ -1,18 +1,57 @@
 #!/bin/bash
-. /usr/local/pisound/scripts/common/common.sh
+# ============================================================
+# run-sc-main_multi.sh — start main_multi.scd (Pi and laptop)
+# ============================================================
+# Kills running SuperCollider / Pd instances, makes sure JACK runs on the right audio interface, tells the
+# patch where the TouchOSC tablet is (TOUCHOSC_IP) and starts main_multi.scd with sclang. Ctrl+C stops it.
+# While the patch runs, the tablet layout of this checkout is served at http://<this machine>:8080/main.tosc
+# (UI_HTTP_PORT, 0 = off): open it in the tablet's browser to load the matching layout into TouchOSC.
+#
+#   ./run-sc-main_multi.sh
+#   TOUCHOSC_IP=192.168.0.50 ./run-sc-main_multi.sh     # settings already in the environment win
+#
+# Pi (detected by its pisound install): if a Focusrite interface (Scarlett, Clarett, ...) is connected, the
+#   pisound JACK service is replaced by jackd on the Focusrite and restored on exit; otherwise the running
+#   pisound JACK is used. Called by launchers/boot-sc.sh (sc-boot.service, pisound button).
+# Any other Linux machine (laptop): a JACK server that is already running is used as it is. Otherwise jackd is
+#   started on JACK_DEVICE (default: the Focusrite if connected, else the built-in card) and stopped on exit.
+# ============================================================
 
-flash_leds 1000
+# ---- Where am I? ----
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCLANG_SCRIPT="$REPO/main_multi.scd"
 
-# Set Qt to use the 'offscreen' platform plugin
-export QT_QPA_PLATFORM=offscreen
+PISOUND_COMMON=/usr/local/pisound/scripts/common/common.sh
+if [[ -f "$PISOUND_COMMON" ]]; then
+    ON_PI=1
+    . "$PISOUND_COMMON"
+else
+    ON_PI=0
+fi
 
-# Set DISPLAY if necessary
-export DISPLAY=:0
+# ============================================================
+# MACHINE SETTINGS
+# ============================================================
+if [[ "$ON_PI" -eq 1 ]]; then
+    : "${TOUCHOSC_IP:=172.24.1.107}"    # tablet on the Pi's hotspot
+else
+    : "${TOUCHOSC_IP:=192.168.0.110}"   # tablet on the home network
+    : "${JACK_DEVICE:=}"                # ALSA device, e.g. hw:USB; empty = Focusrite if connected, else hw:0
+fi
+: "${JACK_RATE:=48000}"                 # must match s.options.sampleRate in config/serversetup.scd
+: "${JACK_PERIOD:=256}"
+: "${JACK_NPERIODS:=2}"
+: "${UI_HTTP_PORT:=8080}"               # serves ui/main.tosc to the tablet; 0 = off
+export TOUCHOSC_IP                      # read by osc/oscconfig_multi.scd
+export UI_HTTP_PORT                     # read by osc/ui_version.scd (for its hints)
+# ============================================================
 
-# Description:
-# This script kills all running instances of SuperCollider and Pure Data (Pd),
-# then starts a SuperCollider script located at /usr/local/sc-patches/FFT-FX/main.scd using sclang.
-# It also handles Ctrl+C to terminate the sclang process gracefully.
+if [[ "$ON_PI" -eq 1 ]]; then
+    flash_leds 1000
+    # Headless: Qt offscreen (no s.meter window)
+    export QT_QPA_PLATFORM=offscreen
+    export DISPLAY=:0
+fi
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
@@ -29,18 +68,36 @@ kill_processes() {
     fi
 }
 
-# Function to handle cleanup on exit
-cleanup() {
-    echo ""
-    echo "Interrupt received. Cleaning up..."
-    if [[ -n "$SCLANG_PID" ]]; then
-        echo "Terminating sclang (PID: $SCLANG_PID)..."
-        kill "$SCLANG_PID" 2>/dev/null || echo "sclang already terminated."
-    fi
+# ---- JACK handling ----
+SCARLETT_JACK_STARTED=0   # Pi: we replaced the pisound JACK with jackd on the Focusrite
+DESKTOP_JACK_STARTED=0    # laptop: we started jackd ourselves
+JACK_PID=""
 
-    # Restore pisound JACK if we switched away from it
+# card number of the first connected Focusrite interface (empty if none).
+# /proc/asound/cards lists every card as a header line " 1 [USB  ]: USB-Audio - Scarlett 2i2 USB" followed by
+# its long name "Focusrite Scarlett 2i2 USB at usb-..."; either line may carry the name, depending on the model.
+FOCUSRITE_PATTERN="focusrite|scarlett|clarett"
+focusrite_card() {
+    local card
+    card=$(awk -v pat="$FOCUSRITE_PATTERN" '
+        /^ *[0-9]+ \[/ { n = $1 }
+        tolower($0) ~ pat { print n; exit }' /proc/asound/cards 2>/dev/null)
+    if [[ -z "$card" ]]; then
+        # fallback: ALSA's own listing
+        card=$(LANG=C aplay -l 2>/dev/null | grep -iE "$FOCUSRITE_PATTERN" | head -n 1 | sed 's/^card \([0-9]*\):.*/\1/')
+    fi
+    echo "$card"
+}
+# its name as the kernel reports it (for the log)
+focusrite_name() {
+    # " 1 [USB            ]: USB-Audio - Scarlett 2i2 USB"  ->  "Scarlett 2i2 USB"
+    awk -v c="$1" '$1 == c && /\[/ { sub(/^[^]]*\]: [^ ]+ - /, ""); print; exit }' /proc/asound/cards 2>/dev/null
+}
+
+# Pi: restore the pisound JACK if we switched away from it
+restore_pi_jack() {
     if [[ "${SCARLETT_JACK_STARTED:-0}" -eq 1 ]]; then
-        echo "Stopping Scarlett JACK and restoring pisound JACK..."
+        echo "Stopping Focusrite JACK and restoring pisound JACK..."
         sudo pkill -x jackd 2>/dev/null || true
         sleep 1
         # Restart the JACK systemd service if it exists, otherwise let pisound handle it
@@ -50,88 +107,201 @@ cleanup() {
             jack_control start 2>/dev/null || true
         fi
         echo "Pisound JACK restored."
+        SCARLETT_JACK_STARTED=0
     fi
+}
 
+# laptop: stop the jackd we started (a JACK server that was already running is left alone)
+stop_desktop_jack() {
+    if [[ "${DESKTOP_JACK_STARTED:-0}" -eq 1 && -n "$JACK_PID" ]]; then
+        echo "Stopping JACK (PID: $JACK_PID)..."
+        kill "$JACK_PID" 2>/dev/null || true
+        DESKTOP_JACK_STARTED=0
+    fi
+}
+
+# ---- Tablet layout server ----
+# Serves ui/ of this checkout, so the layout the tablet downloads always belongs to the code that runs.
+UI_HTTP_PID=""
+start_ui_server() {
+    if [[ "$UI_HTTP_PORT" == "0" ]]; then
+        return
+    fi
+    if ! command -v python3 &>/dev/null; then
+        echo "python3 not found: the tablet layout is not served."
+        return
+    fi
+    # a server left over from a crashed run would keep the port
+    pkill -f "http.server $UI_HTTP_PORT --directory $REPO/ui" 2>/dev/null || true
+    local log="${XDG_RUNTIME_DIR:-/tmp}/sc-store-ui-http.log"
+    python3 -B -m http.server "$UI_HTTP_PORT" --directory "$REPO/ui" >"$log" 2>&1 &
+    UI_HTTP_PID=$!
+    sleep 0.5
+    if ! kill -0 "$UI_HTTP_PID" 2>/dev/null; then
+        echo "Warning: the tablet layout server did not start (port $UI_HTTP_PORT in use?): $(tail -n 1 "$log")"
+        UI_HTTP_PID=""
+        return
+    fi
+    # addresses the tablet can reach: IPv4 of the real interfaces (not Docker / VM bridges)
+    local iface ip
+    while read -r iface ip; do
+        case "$iface" in docker*|br-*|veth*|virbr*|lo) continue ;; esac
+        echo "Tablet start page: http://${ip%/*}:$UI_HTTP_PORT/   (layout: .../main.tosc, log: $log)"
+    done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}')
+    if systemctl is-active --quiet ufw 2>/dev/null; then
+        echo "Note: the ufw firewall is active. If the tablet gets a timeout, allow the port once:"
+        echo "      sudo ufw allow proto tcp from 192.168.0.0/16 to any port $UI_HTTP_PORT"
+    fi
+}
+stop_ui_server() {
+    if [[ -n "$UI_HTTP_PID" ]]; then
+        kill "$UI_HTTP_PID" 2>/dev/null || true
+        UI_HTTP_PID=""
+    fi
+}
+
+# Function to handle cleanup on exit
+cleanup() {
+    echo ""
+    echo "Interrupt received. Cleaning up..."
+    if [[ -n "$SCLANG_PID" ]]; then
+        echo "Terminating sclang (PID: $SCLANG_PID)..."
+        kill "$SCLANG_PID" 2>/dev/null || echo "sclang already terminated."
+        wait "$SCLANG_PID" 2>/dev/null || true
+    fi
+    if [[ "$ON_PI" -eq 0 ]]; then
+        # sclang does not quit its server when it is killed; on SIGTERM / SIGHUP it would keep playing
+        pkill -x scsynth 2>/dev/null || true
+        pkill -f "polytracker run" 2>/dev/null || true
+    fi
+    stop_ui_server
+    restore_pi_jack
+    stop_desktop_jack
     exit 1
 }
 
-# Trap SIGINT (Ctrl+C) and call cleanup
-trap cleanup SIGINT
+if [[ "$ON_PI" -eq 1 ]]; then
+    trap cleanup SIGINT
+else
+    trap cleanup SIGINT SIGTERM SIGHUP   # also when the terminal is closed: do not leave our jackd behind
+fi
 
-# 1. Kill all SuperCollider instances
+# 1. Kill all SuperCollider instances (another sclang would take port 57120, which the tablet sends to)
 kill_processes "sclang"
 kill_processes "scsynth"
+# A leftover polyphonic pitch tracker normally exits together with sclang; make sure
+pkill -f "polytracker run" 2>/dev/null || true
 
-# 2. Kill all Pure Data (Pd) instances
-kill_processes "pd"
+# 2. Kill all Pure Data (Pd) instances (Pi only: on the laptop Pd may be in use for something else)
+if [[ "$ON_PI" -eq 1 ]]; then
+    kill_processes "pd"
+fi
 
 # Optional: Wait a moment to ensure processes have terminated
 sleep 1
 
-# 2.5. Detect Scarlett 2i2 and switch JACK to it if present
-# Track whether we started a custom JACK session so we can restore it on exit
-SCARLETT_JACK_STARTED=0
+# 2.5. JACK
+if [[ "$ON_PI" -eq 1 ]]; then
+    # Detect a Focusrite interface and switch JACK to it if present
+    SCARLETT_CARD=$(focusrite_card)
+    if [[ -n "$SCARLETT_CARD" ]]; then
+        echo "Focusrite found on card $SCARLETT_CARD ($(focusrite_name "$SCARLETT_CARD")), switching JACK to hw:$SCARLETT_CARD..."
 
-SCARLETT_LINE=$(aplay -l 2>/dev/null | grep -i "scarlett" | head -n 1)
-if [[ -n "$SCARLETT_LINE" ]]; then
-    SCARLETT_CARD=$(echo "$SCARLETT_LINE" | sed 's/^card \([0-9]*\):.*/\1/')
-    echo "Scarlett 2i2 found on card $SCARLETT_CARD, switching JACK to hw:$SCARLETT_CARD..."
-
-    # Stop any JACK session: try systemd service first, then fall back to pkill
-    if systemctl is-active --quiet jack || systemctl is-active --quiet jackd; then
-        echo "Stopping JACK systemd service..."
-        sudo systemctl stop jack jackd 2>/dev/null || true
-    fi
-    # Also stop jack_control if present
-    if command -v jack_control &>/dev/null; then
-        jack_control stop 2>/dev/null || true
-        sleep 0.5
-    fi
-    # Kill any remaining jackd processes
-    sudo pkill -x jackd 2>/dev/null || true
-    sleep 1
-    # Clean up stale JACK shared memory and semaphores
-    sudo rm -f /dev/shm/jack_* 2>/dev/null || true
-    sudo rm -f /tmp/jack_* 2>/dev/null || true
-    # Avoid audio device reservation via session bus (prevents dbus/X11 autolaunch errors)
-    export JACK_NO_AUDIO_RESERVATION=1
-    # Ensure XDG_RUNTIME_DIR is set (avoids related warnings)
-    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-root}"
-    # Start JACK on the Scarlett card
-    jackd -d alsa -d hw:"$SCARLETT_CARD" -r 48000 -p 256 -n 2 &
-    JACK_PID=$!
-    echo "JACK started on Scarlett 2i2 (PID: $JACK_PID)."
-    SCARLETT_JACK_STARTED=1
-
-    # Wait until JACK is actually ready (up to 10 seconds)
-    echo "Waiting for JACK to become ready..."
-    JACK_READY=0
-    for i in $(seq 1 20); do
-        if jack_lsp &>/dev/null; then
-            echo "JACK is ready."
-            JACK_READY=1
-            break
+        # Stop any JACK session: try systemd service first, then fall back to pkill
+        if systemctl is-active --quiet jack || systemctl is-active --quiet jackd; then
+            echo "Stopping JACK systemd service..."
+            sudo systemctl stop jack jackd 2>/dev/null || true
         fi
-        sleep 0.5
-    done
-    if [[ "$JACK_READY" -eq 0 ]]; then
-        echo "Warning: JACK did not become ready in time. SuperCollider may not connect to Scarlett."
+        # Also stop jack_control if present
+        if command -v jack_control &>/dev/null; then
+            jack_control stop 2>/dev/null || true
+            sleep 0.5
+        fi
+        # Kill any remaining jackd processes
+        sudo pkill -x jackd 2>/dev/null || true
+        sleep 1
+        # Clean up stale JACK shared memory and semaphores
+        sudo rm -f /dev/shm/jack_* 2>/dev/null || true
+        sudo rm -f /tmp/jack_* 2>/dev/null || true
+        # Avoid audio device reservation via session bus (prevents dbus/X11 autolaunch errors)
+        export JACK_NO_AUDIO_RESERVATION=1
+        # Ensure XDG_RUNTIME_DIR is set (avoids related warnings)
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-root}"
+        # Start JACK on the Focusrite card
+        jackd -d alsa -d hw:"$SCARLETT_CARD" -r "$JACK_RATE" -p "$JACK_PERIOD" -n "$JACK_NPERIODS" &
+        JACK_PID=$!
+        echo "JACK started on the Focusrite (PID: $JACK_PID)."
+        SCARLETT_JACK_STARTED=1
+
+        # Wait until JACK is actually ready (up to 10 seconds)
+        echo "Waiting for JACK to become ready..."
+        JACK_READY=0
+        for i in $(seq 1 20); do
+            if jack_lsp &>/dev/null; then
+                echo "JACK is ready."
+                JACK_READY=1
+                break
+            fi
+            sleep 0.5
+        done
+        if [[ "$JACK_READY" -eq 0 ]]; then
+            echo "Warning: JACK did not become ready in time. SuperCollider may not connect to the Focusrite."
+        fi
+    else
+        echo "No Focusrite found, using pisound via existing JACK."
     fi
 else
-    echo "Scarlett 2i2 not found, using pisound via existing JACK."
+    # JACK_NO_START_SERVER: only ask, never let jack_lsp start a default server
+    if JACK_NO_START_SERVER=1 jack_lsp &>/dev/null; then
+        echo "JACK is already running, using it."
+    else
+        if [[ -z "$JACK_DEVICE" ]]; then
+            SCARLETT_CARD=$(focusrite_card)
+            if [[ -n "$SCARLETT_CARD" ]]; then
+                JACK_DEVICE="hw:$SCARLETT_CARD"
+                echo "Focusrite found on card $SCARLETT_CARD ($(focusrite_name "$SCARLETT_CARD"))."
+            else
+                JACK_DEVICE="hw:0"
+                echo "No Focusrite found, using the built-in card."
+            fi
+        fi
+        echo "Starting JACK: jackd -d alsa -d $JACK_DEVICE -r $JACK_RATE -p $JACK_PERIOD -n $JACK_NPERIODS"
+        jackd -d alsa -d "$JACK_DEVICE" -r "$JACK_RATE" -p "$JACK_PERIOD" -n "$JACK_NPERIODS" &
+        JACK_PID=$!
+        DESKTOP_JACK_STARTED=1
+
+        JACK_READY=0
+        for i in $(seq 1 20); do
+            if ! kill -0 "$JACK_PID" 2>/dev/null; then
+                echo "Error: jackd exited (is $JACK_DEVICE in use by another program?)."
+                exit 1
+            fi
+            if JACK_NO_START_SERVER=1 jack_lsp &>/dev/null; then
+                echo "JACK is ready."
+                JACK_READY=1
+                break
+            fi
+            sleep 0.5
+        done
+        if [[ "$JACK_READY" -eq 0 ]]; then
+            echo "Error: JACK did not become ready in time."
+            stop_desktop_jack
+            exit 1
+        fi
+    fi
 fi
 
 # 3. Start the SuperCollider script
-# Define the path to your main.scd script
-SCLANG_SCRIPT="/usr/local/sc-patches/sc-store/main_multi.scd"
-
 # Check if the script exists
 if [[ ! -f "$SCLANG_SCRIPT" ]]; then
     echo "Error: SuperCollider script '$SCLANG_SCRIPT' not found."
+    stop_desktop_jack
     exit 1
 fi
 
-echo "Starting SuperCollider script: $SCLANG_SCRIPT"
+start_ui_server
+
+echo "Starting SuperCollider script: $SCLANG_SCRIPT (TouchOSC tablet: $TOUCHOSC_IP)"
 # Start sclang with the script in the background
 sclang "$SCLANG_SCRIPT" &
 SCLANG_PID=$!
@@ -139,21 +309,13 @@ SCLANG_PID=$!
 echo "SuperCollider script started successfully with PID: $SCLANG_PID."
 
 # Wait for the sclang process to finish
-wait "$SCLANG_PID"
+SCLANG_STATUS=0
+wait "$SCLANG_PID" || SCLANG_STATUS=$?
+echo "SuperCollider exited (status $SCLANG_STATUS)."
 
-# Restore pisound JACK if we switched to Scarlett
-if [[ "${SCARLETT_JACK_STARTED:-0}" -eq 1 ]]; then
-    echo "SuperCollider exited. Stopping Scarlett JACK and restoring pisound JACK..."
-    sudo pkill -x jackd 2>/dev/null || true
-    sleep 1
-    if systemctl list-unit-files jack.service &>/dev/null || systemctl list-unit-files jackd.service &>/dev/null; then
-        sudo systemctl start jack jackd 2>/dev/null || true
-    elif command -v jack_control &>/dev/null; then
-        jack_control start 2>/dev/null || true
-    fi
-    echo "Pisound JACK restored."
-fi
+stop_ui_server
+restore_pi_jack
+stop_desktop_jack
 
-# Optional: Exit the script
-exit 0
-
+# Pass sclang's exit status on: on the Pi, sc-boot.service (Restart=on-failure) restarts the patch after a crash
+exit "$SCLANG_STATUS"

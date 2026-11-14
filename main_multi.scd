@@ -19,17 +19,54 @@ thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig_multi.scd");
 // granular.scd uses ~busNames[\density] etc. (grain indices, unchanged)
 thisProcess.interpreter.executeFile(~basePath ++ "synths/granular.scd");
 // fft_freeze.scd uses ~busNames[\fftFreeze] etc. (grain indices, unchanged)
-thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
+// fft_freeze.scd needs PV_Freeze / PV_Morph from sc3-plugins. Without them the whole file fails to compile, \fftFreeze
+// never exists, and the grain output (it is routed through that synth) never reaches the master = silence.
+// Fall back to a dry pass-through so the patch still sounds; freeze / filter / morph do nothing until it is installed.
+if(\PV_Freeze.asClass.notNil and: { \PV_Morph.asClass.notNil }) {
+	thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
+} {
+	"sc3-plugins is not installed (PV_Freeze / PV_Morph missing): FFT freeze/morph DISABLED, grain output passes through dry. Install it with: sudo apt install sc3-plugins".warn;
+	SynthDef(\fftFreeze, { |micIn=0, granIn=0, out=0, ccBus=0, freeze=0, fftFilterAmt=0, morphAmt=0, fftVol=0|
+		Out.ar(out, In.ar(granIn, 2));
+	}).add;
+};
 // tapeemulate.scd uses ~busNames[\badness] etc. — now baked as 90–96
 thisProcess.interpreter.executeFile(~basePath ++ "synths/tapeemulate.scd");
-// inputtracker.scd: \tartiniTracker_sigmundStyle (no ~busNames refs)
+// inputtracker.scd: ~polyTrackerNew (polyphonic ML tracker) + \polyTracker SynthDef (no ~busNames refs)
 thisProcess.interpreter.executeFile(~basePath ++ "classes/inputtracker.scd");
 // master.scd: \master SynthDef uses ~busNames[\masterVol].index = 11 (grain master)
 thisProcess.interpreter.executeFile(~basePath ++ "classes/master.scd");
+// cembalo.scd: \cembalo voices + ~cembaloNew (plucked by the tracker's note-ons; no ~busNames refs)
+thisProcess.interpreter.executeFile(~basePath ++ "synths/cembalo.scd");
 
-// ---- Tape output stage SynthDef (inline — cannot use \master, which hardcodes CC 11) ----
-// \ape already applies its own master_vol from CC 96 internally.
-// \tapeOutput is purely a mute/enable gate controlled via ~tapeMaster.set(\amp, ...).
+// ---- Grain input mixer ----
+// Whatever this writes is what \rec puts into the grain buffer (and what the FFT freeze freezes).
+// guitar / cembalo / tape are 0..1 gains (the /grain/src* toggles); any combination can be on.
+// The stereo synths are summed to mono at -3 dB.
+// The sum is limited to 0.9 (10 ms look-ahead; only the recording is delayed, nothing you hear directly):
+// \rec hard-clips at ±1, and the tape synth alone peaks around 1.4.
+SynthDef(\grainSource, { |out=0, guitarIn=0, cembaloIn=0, tapeIn=0, guitar=1, cembalo=0, tape=0|
+	var sig = (In.ar(guitarIn, 1) * guitar.lag(0.05))
+		+ (In.ar(cembaloIn, 2).sum * 0.7071 * cembalo.lag(0.05))
+		+ (In.ar(tapeIn, 2).sum * 0.7071 * tape.lag(0.05));
+	sig = Limiter.ar(Sanitize.ar(sig), 0.9, 0.005);
+	Out.ar(out, sig);
+}).add;
+
+// ---- Output safety stage (last node on the server) ----
+// Whatever happens upstream (grain overlaps adding up, a synth blowing up, NaN / inf), the hardware outputs never
+// get more than `ceiling` (≈ -0.5 dBFS): bad values become silence, DC is removed, peaks are limited
+// (5 ms look-ahead = 10 ms latency).
+SynthDef(\outputSafety, { |ceiling=0.95|
+	var sig = Sanitize.ar(In.ar(0, 2));
+	sig = LeakDC.ar(sig);
+	sig = Limiter.ar(sig, ceiling, 0.005);
+	ReplaceOut.ar(0, Sanitize.ar(sig).clip(-1, 1));
+}).add;
+
+// ---- Tape / cembalo output stage SynthDef (inline — cannot use \master, which hardcodes CC 11) ----
+// \ape already applies its own master_vol from CC 96 internally, the cembalo its own volume.
+// \tapeOutput is purely a mute/enable gate controlled via ~tapeMaster / ~cembaloMaster .set(\amp, ...).
 SynthDef(\tapeOutput, { |out=0, inBus=0, amp=0.0|
 	var sig = In.ar(inBus, 2);
 	sig = sig * amp.lag(0.1);
@@ -38,29 +75,50 @@ SynthDef(\tapeOutput, { |out=0, inBus=0, amp=0.0|
 
 s.waitForBoot {
 	// ---- System state ----
-	~synthEnabled = ( grain: true, tape: false );
+	~synthEnabled = ( grain: true, tape: false, cembalo: false );  // audible on the outputs
+	~grainSrc     = ( guitar: true, cembalo: false, tape: false );  // fed into the grain buffer
 	~focusedSynth = \grain;
+
+	// ---- CC slots: FIRST control buses after the boot (see midi/midiconfig_multi.scd) ----
+	~ccBuses = Bus.control(s, 128);
+	~ccBuses.setn(Array.fill(128, 0.0));
+
+	// ---- Tape synth starting sound (CC 90–96), so it plays without the tablet (footswitch) ----
+	// A soft, slightly wobbly sine/saw pad under the cembalo. master 0.1 puts its level (RMS) about level with the
+	// cembalo's (measured with a strummed test signal; at 0.35 the tape was 14 dB louder and covered the plucks).
+	// A preset that contains tape values replaces these.
+	~tapeDefaults = (
+		badness: 0.12, wavemix: 0.35, wavemap: 0.15, badnessmap: 0.1,
+		reverb_mix: 0.35, reverb_room: 0.75, master: 0.1
+	);
+	~tapeDefaults.keysValuesDo { |k, v| ~ccBuses.setAt(~busNames[k].index, v) };
 
 	// ---- Audio buses ----
 	~micBus      = Bus.audio(s, 1);   // mono microphone input
+	~grainSrcBus = Bus.audio(s, 1);   // selected sources (guitar / cembalo / tape) → \rec + FFT freeze
+	~cembaloOutBus = Bus.audio(s, 2); // cembalo output → cembalo output stage + grain input mixer
 	~ptrBus      = Bus.audio(s, 1);   // record pointer
 	~fftInBus    = Bus.audio(s, 2);   // grain → FFT stage input
 	~grainOutBus = Bus.audio(s, 2);   // FFT stage output → grain master
 	~tapeOutBus  = Bus.audio(s, 2);   // \ape output → tape output stage
-	~freqBus     = Bus.control(s, 1); // Tartini pitch output
-	~ampBus      = Bus.control(s, 1); // Tartini amplitude output
+	~freqBus     = Bus.control(s, 1); // tracker mono pitch output
+	~ampBus      = Bus.control(s, 1); // tracker amplitude output
 	s.sync;
 
 	// ---- Groups (ordered for signal flow) ----
+	// The tape synth and the cembalo run before the recorder, so they can be fed into the grain buffer.
 	~micGrp     = Group.new;
-	~ptrGrp     = Group.after(~micGrp);
+	~tartiniGrp = Group.after(~micGrp);
+	~tapeGrp    = Group.after(~tartiniGrp);
+	~cembaloGrp = Group.after(~tapeGrp);
+	~srcGrp     = Group.after(~cembaloGrp);
+	~ptrGrp     = Group.after(~srcGrp);
 	~recGrp     = Group.after(~ptrGrp);
-	~tartiniGrp = Group.after(~recGrp);
-	~granGrp    = Group.after(~tartiniGrp);
+	~granGrp    = Group.after(~recGrp);
 	~fftGrp     = Group.after(~granGrp);
-	~tapeGrp    = Group.after(~fftGrp);
-	~masterGrp  = Group.after(~tapeGrp);
+	~masterGrp  = Group.after(~fftGrp);
 	s.sync;
+	~outputSafety = Synth(\outputSafety, [], s, \addToTail);  // stays the last node: groups go before it
 
 	// ---- Buffer setup ----
 	~bufferDurSec = 4.0;
@@ -69,11 +127,20 @@ s.waitForBoot {
 
 	// ---- Granular chain ----
 	~mic = Synth(\mic, [\in, 0, \out, ~micBus], ~micGrp);
+	~grainSrcMix = Synth(\grainSource, [
+		\out,       ~grainSrcBus,
+		\guitarIn,  ~micBus,
+		\cembaloIn, ~cembaloOutBus,
+		\tapeIn,    ~tapeOutBus,
+		\guitar,    ~grainSrc[\guitar].asInteger,
+		\cembalo,   ~grainSrc[\cembalo].asInteger,
+		\tape,      ~grainSrc[\tape].asInteger,
+	], ~srcGrp);
 	~ptr = Synth(\ptr, [\out, ~ptrBus, \buf, b], ~ptrGrp);
 	~rec = Synth(\rec, [
 		\ccBus,     ~ccBuses,
 		\ptrIn,     ~ptrBus,
-		\micIn,     ~micBus,
+		\micIn,     ~grainSrcBus,
 		\buf,       b,
 		\recGate,   0,
 		\xfadeTime, 0.05
@@ -121,7 +188,7 @@ s.waitForBoot {
 	], ~granGrp);
 
 	~fftFx = Synth(\fftFreeze, [
-		\micIn,       ~micBus,
+		\micIn,       ~grainSrcBus,
 		\granIn,      ~fftInBus,
 		\ccBus,       ~ccBuses,
 		\out,         ~grainOutBus,
@@ -130,18 +197,68 @@ s.waitForBoot {
 		\morphAmt,    0,
 	], ~fftGrp);
 
-	// ---- Tartini pitch tracker (shared; used by \ape) ----
-	~tartini = Synth(\tartiniTracker_sigmundStyle,
-		[\inChan, 0, \freqBus, ~freqBus, \ampBus, ~ampBus], ~tartiniGrp);
+	// ---- Polyphonic pitch tracker (shared; used by \apePoly and the cembalo) ----
+	// ~tartini keeps its old name. It only runs while the tape synth or the cembalo is in use (~updateChains).
+	~tartini = ~polyTrackerNew.(s, (
+		inChan: 0, freqBus: ~freqBus, ampBus: ~ampBus,
+		target: ~tartiniGrp, addAction: \addToHead
+	)).start;
 
 	// ---- Tape chain ----
-	// \ape reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time).
-	~ape = Synth(\ape, [
-		\ccBus,       ~ccBuses,
-		\input_pitch, ~freqBus.index,
-		\vol,         ~ampBus.index,
-		\out,         ~tapeOutBus,
+	// \apePoly = \ape with one oscillator per tracked note (up to 6), so chords are played as chords.
+	// It reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time), like \ape.
+	// Tweak: ~ape.set(\voiceBalance, 0)  all notes equally loud (1 = follow the guitar's note levels)
+	//        ~ape.set(\rel, 0.5)          longer note release (s);  \atk attack (s);  \freqLag pitch smoothing (s)
+	~ape = Synth(\apePoly, [
+		\ccBus,   ~ccBuses,
+		\polyBus, ~tartini[\block].index,
+		\vol,     ~ampBus.index,
+		\out,     ~tapeOutBus,
 	], ~tapeGrp);
+
+	// ---- Cembalo chain ----
+	// Plucked by the tracker's note-ons; its velocity follows the guitar input (~micBus).
+	// Its output goes to ~cembaloOutBus: heard via ~cembaloMaster, fed to the grains via ~grainSrcMix.
+	// Parameters come from the /cembalo/* faders (normalised 0..1, stored in CC slots 100–108).
+	~cembaloSpecs = (
+		volume: ControlSpec(0, 1),           bright: ControlSpec(0, 1),
+		noise:  ControlSpec(0, 1),           warmth: ControlSpec(0, 1),
+		weird:  ControlSpec(0, 1),           octave: ControlSpec(0, 1),
+		decay:  ControlSpec(0.5, 10, \exp),  // ring time of a 220 Hz note (s)
+		revMix: ControlSpec(0, 1),           room:   ControlSpec(0, 1),
+	);
+	// defaults in real units
+	// (blended with ~tapeDefaults: the cembalo plays the attacks, the tape synth the sustained bed)
+	~cembaloDefaults = (volume: 1.0, bright: 0.2, noise: 0.55, warmth: 0.8, weird: 0.35, octave: 0.3,
+		decay: 3.5, revMix: 0.25, room: 0.8);
+	~cembaloNorm = ();  // current normalised fader values (language-side mirror of CC 100–108)
+
+	~cembalo = ~cembaloNew.(s, ~tartini, (
+		inBus: ~micBus, out: ~cembaloOutBus, target: ~cembaloGrp, maxVoices: 12
+	));
+
+	// Set one cembalo parameter from a normalised 0..1 value: cembalo + CC slot (presets) + TouchOSC feedback.
+	~setCembaloParam = { |key, norm|
+		var spec = ~cembaloSpecs[key];
+		if(spec.notNil) {
+			norm = norm.clip(0.0, 1.0);
+			~cembaloNorm[key] = norm;
+			~ccBuses.setAt(~busNames[("cembalo_" ++ key).asSymbol].index, norm);
+			~cembalo.set(key, spec.map(norm));
+			~sendToTouchOSC !? { ~sendToTouchOSC.("/cembalo/" ++ key, norm) };
+		} {
+			("cembalo: no fader for %".format(key)).warn;
+		};
+	};
+	~cembaloDefaults.keysValuesDo { |k, v| ~setCembaloParam.(k, ~cembaloSpecs[k].unmap(v)) };
+
+	// Preset load hook (osc/presets.scd): apply the stored cembalo faders to the cembalo.
+	~onPresetFaders = { |faders|
+		~cembaloSpecs.keysDo { |k|
+			var v = faders[~busNames[("cembalo_" ++ k).asSymbol].index];
+			v !? { ~setCembaloParam.(k, v) };
+		};
+	};
 
 	// ---- Master synths ----
 	// Grain master: reads CC 11 (masterVol) via \master SynthDef; starts enabled.
@@ -160,6 +277,54 @@ s.waitForBoot {
 		\amp,   0.0,
 	], ~masterGrp);
 
+	// Cembalo output stage: same gate; the cembalo's own volume is the /cembalo/volume fader.
+	~cembaloMaster = Synth(\tapeOutput, [
+		\inBus, ~cembaloOutBus,
+		\out,   0,
+		\amp,   0.0,
+	], ~masterGrp);
+
+	// ---- Which chains run ----
+	// tape synth: runs while audible (~synthEnabled[\tape]) or fed to the grains (~grainSrc[\tape]); same for the cembalo.
+	// The pitch tracker runs while either of them runs. Everything else is paused (no CPU).
+	// Call ~updateChains.() after changing ~synthEnabled or ~grainSrc.
+	~chainNeeds = {
+		var ape  = ~synthEnabled[\tape]    or: { ~grainSrc[\tape] };
+		var cemb = ~synthEnabled[\cembalo] or: { ~grainSrc[\cembalo] };
+		(ape: ape, cembalo: cemb, tracker: ape or: { cemb })
+	};
+
+	~pauseUnusedChains = {
+		var need = ~chainNeeds.();
+		if(need[\ape].not) { ~ape.run(false) };
+		if(need[\cembalo].not and: { ~cembalo[\enabled] }) { ~cembalo.enable(false) };
+		if(need[\tracker].not) { ~tartini.run(false) };
+		if(~synthEnabled[\tape].not)    { ~tapeMaster.run(false) };
+		if(~synthEnabled[\cembalo].not) { ~cembaloMaster.run(false) };
+	};
+
+	~updateChains = {
+		var need = ~chainNeeds.();
+		// start what is needed now
+		if(need[\tracker]) { ~tartini.run(true) };
+		if(need[\ape]) { ~ape.run(true) };
+		if(need[\cembalo] and: { ~cembalo[\enabled].not }) { ~cembalo.enable(true) };
+		if(~synthEnabled[\tape])    { ~tapeMaster.run(true) };
+		if(~synthEnabled[\cembalo]) { ~cembaloMaster.run(true) };
+		// gains (all lagged, so switching is click-free)
+		~tapeMaster.set(\amp, ~synthEnabled[\tape].asInteger);
+		~cembaloMaster.set(\amp, ~synthEnabled[\cembalo].asInteger);
+		~grainSrcMix.set(
+			\guitar,  ~grainSrc[\guitar].asInteger,
+			\cembalo, ~grainSrc[\cembalo].asInteger,
+			\tape,    ~grainSrc[\tape].asInteger
+		);
+		// pause the rest once faded out (re-checked then, in case it was switched back on meanwhile)
+		AppClock.sched(0.25, { ~pauseUnusedChains.(); nil });
+	};
+
+	~pauseUnusedChains.();  // boot: only the grain chain (guitar in) runs
+
 	// ---- Master volume helper (grain chain) ----
 	// Single point of control: sets CC 11 bus + sends /master/volume to TouchOSC.
 	~setMasterVol = { |val|
@@ -171,9 +336,6 @@ s.waitForBoot {
 	~setMasterVol.(1.0);
 
 	// ---- State variables for grain toggles ----
-	~recState       = false;
-	~liveMode       = false;
-	~liveRoutine    = nil;
 	~reverseState   = false;
 	~fixedPosState  = false;
 	~fftFreezeState = false;
@@ -196,54 +358,106 @@ s.waitForBoot {
 		~xyVoices.do { |v| v !? { v.set(\maxDensHz, capHz) } };
 	};
 
-	// ---- Buffer management functions ----
+	// ============================================================
+	// Recorder: the grain buffer
+	// ============================================================
+	// The buffer is a loop of ~bufferDurSec seconds; the write head runs through it all the time.
+	//   REC on  (recording): the grain input is written into the loop. Overdub: the Feedback fader sets how
+	//                        much of the old content stays. Grains and XY voices follow just behind the head.
+	//   REC off (holding):   nothing is written, the loop keeps playing. XY voices play fixed positions.
+	// One switch: the tablet's REC button (/grain/record). CLEAR empties the loop, LOAD SAMPLE puts the next
+	// file of samples/ into it (and switches REC off, so the sample is not overwritten right away).
+	// The tablet's status line (/grain/recStatus) says what the loop holds: RECORDING / LOOP / SAMPLE / EMPTY.
+	~recState      = false;
+	~bufferContent = \empty;   // \empty | \recorded | \sample (status line only)
+	~sampleName    = nil;
+	~samplesDir    = ~basePath ++ "samples/";
+	~sampleIndex   = -1;
+	~sampleExtensions = #["wav", "aif", "aiff", "flac", "ogg"];
 
-	~loadBuffer = { |path|
-		if (path.notNil) {
-			b.free;
-			b = Buffer.readChannel(s, path, channels: [0], action: { |buf|
-				("Buffer loaded: " ++ path ++ " (" ++ buf.numFrames ++ " frames)").postln;
-				~ptr.set(\buf, buf);
-				~rec.set(\buf, buf);
-				~g.set(\buf, buf);
-			});
-		} {
-			Dialog.openPanel({ |path| ~loadBuffer.(path); });
+	~sendRecStatus = {
+		var len = ~bufferDurSec.round(0.1).asString ++ " s";
+		var text = case
+			{ ~recState } { "RECORDING  " ++ len }
+			{ ~bufferContent == \sample } { (~sampleName ? "sample").keep(16) ++ "  " ++ len }
+			{ ~bufferContent == \recorded } { "LOOP  " ++ len }
+			{ "EMPTY  " ++ len };
+		~touchOSC !? {
+			~touchOSC.sendMsg('/grain/record', ~recState.asInteger.asFloat);
+			~touchOSC.sendMsg('/grain/recStatus', text);
 		};
+	};
+
+	~setRecording = { |on|
+		~recState = on;
+		~rec.set(\recGate, on.asInteger);
+		if (on) { ~bufferContent = \recorded; ~sampleName = nil };
+		~sendRecStatus.();
+		("Record: " ++ if (on, "ON", "OFF (holding the loop)")).postln;
+	};
+
+	// Point every reader / writer at a new buffer, then free the old one
+	~switchBuffer = { |buf|
+		var old = b;
+		b = buf;
+		~ptr.set(\buf, buf);
+		~rec.set(\buf, buf);
+		~g.set(\buf, buf);
+		~xyVoices.do { |v| v !? { v.set(\buf, buf) } };
+		if (old.notNil and: { old != buf }) { s.sendBundle(0.2, old.freeMsg) };  // after the readers moved
+		~bufferDurSec = buf.duration;
 	};
 
 	~deleteBuffer = {
 		b.zero;
+		~bufferContent = if (~recState) { \recorded } { \empty };
+		~sampleName = nil;
+		~sendRecStatus.();
 		"Buffer cleared.".postln;
 	};
 
+	// path: a sound file; nil = the next file in samples/ (in alphabetical order, starts over at the end)
+	~loadBuffer = { |path|
+		var files;
+		if (path.isNil) {
+			files = if (File.exists(~samplesDir)) {
+				PathName(~samplesDir).files.select { |f| ~sampleExtensions.includesEqual(f.extension.toLower) }
+					.sort { |f1, f2| f1.fileName < f2.fileName }
+			} { [] };
+			if (files.isEmpty) {
+				~touchOSC !? { ~touchOSC.sendMsg('/grain/recStatus', "no files in samples/") };
+				("No sound files in " ++ ~samplesDir).warn;
+			} {
+				~sampleIndex = (~sampleIndex + 1) % files.size;
+				path = files[~sampleIndex].fullPath;
+			};
+		};
+		path !? {
+			~setRecording.(false);
+			Buffer.readChannel(s, path, channels: [0], action: { |buf|
+				~switchBuffer.(buf);
+				~bufferContent = \sample;
+				~sampleName = PathName(path).fileNameWithoutExtension;
+				~sendBufferLenLabel !? { ~sendBufferLenLabel.(~bufferDurSec) };
+				~sendRecStatus.();
+				("Sample loaded: % (% s)".format(path, ~bufferDurSec.round(0.01))).postln;
+			});
+		};
+	};
+
+	// New, empty buffer of durSec seconds; REC stays as it is
 	~allocBuffer = { |durSec|
-		var wasRecording = ~recState, wasLiveMode = ~liveMode;
 		durSec = durSec ? ~bufferDurSec;
-		~bufferDurSec = durSec;
-		~rec.set(\recGate, 0);
-		b.free;
-		b = Buffer.alloc(s, s.sampleRate * durSec, 1, completionMessage: { |buf|
-			~ptr.set(\buf, buf);
-			~rec.set(\buf, buf);
-			~g.set(\buf, buf);
-			if (wasRecording || wasLiveMode) { ~rec.set(\recGate, 1) };
-			("Buffer allocated: " ++ durSec ++ "s (" ++ buf.numFrames ++ " frames)").postln;
-			~sendToTouchOSC !? { ~sendToTouchOSC.('/grain/bufferLen', durSec.asFloat) };
-		});
-	};
-
-	// ---- Live mode ----
-	~startLiveMode = {
-		~liveMode = true;
-		~rec.set(\recGate, 1);
-		"Live mode ON".postln;
-	};
-
-	~stopLiveMode = {
-		~liveMode = false;
-		~rec.set(\recGate, 0);
-		"Live mode OFF".postln;
+		fork {
+			var buf = Buffer.alloc(s, (s.sampleRate * durSec).round.asInteger, 1);
+			s.sync;
+			~switchBuffer.(buf);
+			~bufferContent = if (~recState) { \recorded } { \empty };
+			~sampleName = nil;
+			~sendBufferLenLabel !? { ~sendBufferLenLabel.(durSec) };  // the label; the fader keeps its 0..1 value
+			~sendRecStatus.();
+			("Buffer allocated: " ++ durSec.round(0.01) ++ " s (" ++ buf.numFrames ++ " frames)").postln;
+		};
 	};
 
 	// ---- MultiXY voice management ----
@@ -273,7 +487,7 @@ s.waitForBoot {
 				\maxDensHz,   spawnCap,
 			];
 			if (~xyVoices[idx].isNil) {
-				~xyVoices[idx] = if (~liveMode) {
+				~xyVoices[idx] = if (~recState) {
 					Synth(\gran, commonArgs ++ [
 						\fixedPos,       0,
 						\fixedPosRand,   0,
@@ -289,7 +503,7 @@ s.waitForBoot {
 					], ~granGrp)
 				};
 			} {
-				if (~liveMode) {
+				if (~recState) {
 					~xyVoices[idx].set(
 						\fixedPosSec,    posSec,
 						\baseDur,        dur,
@@ -323,22 +537,24 @@ s.waitForBoot {
 	// ---- OSC control layer ----
 	thisProcess.interpreter.executeFile(~basePath ++ "osc/oscconfig_multi.scd");
 	thisProcess.interpreter.executeFile(~basePath ++ "osc/presets.scd");
+	// Tablet layout version check (needs every OSCdef registered, so after presets.scd)
+	thisProcess.interpreter.executeFile(~basePath ++ "osc/ui_version.scd");
 
 	// ---- Boot sync: send state to TouchOSC ----
 	AppClock.sched(0.5, {
 		if (s.serverRunning) {
-			if (~presetExists.(0)) { ~loadPreset.(0) } { ~sendAllState.() };
+			if (~loadPreset.(0).not) { ~sendAllState.() };  // missing or damaged preset 0: plain state
 		};
 		nil;
 	});
 	AppClock.sched(3.0, {
 		if (s.serverRunning) {
-			if (~presetExists.(0)) { ~loadPreset.(0) } { ~sendAllState.() };
+			if (~loadPreset.(0).not) { ~sendAllState.() };  // missing or damaged preset 0: plain state
 		};
 		nil;
 	});
 
-	"Multi-synth patch booted (grain ON, tape OFF).".postln;
+	"Multi-synth patch booted (grain ON, tape OFF, cembalo OFF; grain input: guitar).".postln;
 	s.meter;
 };
 )

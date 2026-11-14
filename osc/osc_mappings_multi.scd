@@ -1,7 +1,7 @@
 // ============================================================
 // OSC Address → CC Bus Index Mapping (Multi-Synth Patch)
 // ============================================================
-// Covers BOTH grain (indices 11–83) and tape (remapped to 90–96).
+// Covers grain (indices 11–83), tape (remapped to 90–96) and cembalo (100–108).
 //
 // Tape params use their ORIGINAL key names (badness, wavemix, etc.)
 // pointing to new indices 90–96. This causes the \ape SynthDef to
@@ -63,6 +63,20 @@
 	tape_reverb_mix:  ( index: 94 ),
 	tape_reverb_room: ( index: 95 ),
 	tape_master:      ( index: 96 ),
+
+	// ---- Cembalo params (free zone 100–108) ----
+	// The cembalo's parameters live in sclang (they are read per note), not in a SynthDef, so these slots
+	// only store the normalised fader values for presets and boot sync. ~setCembaloParam (main_multi.scd)
+	// maps them to the real ranges.
+	cembalo_volume:   ( index: 100 ),
+	cembalo_bright:   ( index: 101 ),
+	cembalo_noise:    ( index: 102 ),
+	cembalo_warmth:   ( index: 103 ),
+	cembalo_weird:    ( index: 104 ),
+	cembalo_octave:   ( index: 105 ),
+	cembalo_decay:    ( index: 106 ),
+	cembalo_revMix:   ( index: 107 ),
+	cembalo_room:     ( index: 108 ),
 );
 
 // ---- ~oscMap: OSC address string → (busIndex, type) ----
@@ -100,8 +114,7 @@
 	'/master/volume':      ( busIndex: 11, type: \fader, label: "Master Volume" ),
 
 	// ---- Grain toggles (Page 4) ----
-	'/grain/record':       ( type: \toggle,   label: "Record" ),
-	'/grain/liveMode':     ( type: \toggle,   label: "Live Mode" ),
+	'/grain/record':       ( type: \toggle,   label: "REC (the recorder's one switch, replaces Live Mode)" ),
 	'/grain/reverse':      ( type: \toggle,   label: "Reverse" ),
 	'/grain/fixedPos':     ( type: \toggle,   label: "Fixed Position" ),
 	'/grain/fftFreeze':    ( type: \toggle,   label: "FFT Freeze" ),
@@ -111,8 +124,8 @@
 	'/grain/octaveDown':   ( type: \momentary, label: "Octave Down" ),
 	'/grain/octaveUp':     ( type: \momentary, label: "Octave Up" ),
 	'/grain/pitchReset':   ( type: \momentary, label: "Pitch Reset" ),
-	'/grain/deleteBuffer': ( type: \momentary, label: "Delete Buffer" ),
-	'/grain/loadSample':   ( type: \momentary, label: "Load Sample" ),
+	'/grain/deleteBuffer': ( type: \momentary, label: "CLEAR (empty the loop)" ),
+	'/grain/loadSample':   ( type: \momentary, label: "LOAD SAMPLE (next file of samples/)" ),
 	'/grain/stopAudio':    ( type: \momentary, label: "Stop Audio" ),
 
 	// ---- Preset commands (Page 1) ----
@@ -128,6 +141,22 @@
 	'/tape/reverbMix':     ( busIndex: 94, type: \fader, label: "Tape Reverb Mix" ),
 	'/tape/reverbRoom':    ( busIndex: 95, type: \fader, label: "Tape Reverb Room" ),
 	'/tape/volume':        ( busIndex: 96, type: \fader, label: "Tape Volume" ),
+
+	// ---- Cembalo faders (free zone 100–108; handled by ~setCembaloParam, see oscconfig_multi.scd) ----
+	'/cembalo/volume':     ( busIndex: 100, type: \fader, label: "Cembalo Volume" ),
+	'/cembalo/bright':     ( busIndex: 101, type: \fader, label: "Cembalo Bright" ),
+	'/cembalo/noise':      ( busIndex: 102, type: \fader, label: "Cembalo Noise" ),
+	'/cembalo/warmth':     ( busIndex: 103, type: \fader, label: "Cembalo Warmth" ),
+	'/cembalo/weird':      ( busIndex: 104, type: \fader, label: "Cembalo Weird" ),
+	'/cembalo/octave':     ( busIndex: 105, type: \fader, label: "Cembalo 4' String" ),
+	'/cembalo/decay':      ( busIndex: 106, type: \fader, label: "Cembalo Decay" ),
+	'/cembalo/revMix':     ( busIndex: 107, type: \fader, label: "Cembalo Reverb Mix" ),
+	'/cembalo/room':       ( busIndex: 108, type: \fader, label: "Cembalo Reverb Room" ),
+
+	// ---- Grain input sources (toggles, any combination) ----
+	'/grain/srcGuitar':    ( type: \toggle,   label: "Grain In: Guitar" ),
+	'/grain/srcCembalo':   ( type: \toggle,   label: "Grain In: Cembalo" ),
+	'/grain/srcTape':      ( type: \toggle,   label: "Grain In: Tape Synth" ),
 );
 
 // ---- Reverse lookup: bus index → OSC address (for feedback) ----

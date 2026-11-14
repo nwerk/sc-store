@@ -16,16 +16,15 @@ s.waitForBoot{
     // Ensure amp bus exists (used by master)
     ~ampBus = ~ampBus ? Bus.control(s, 1);
 
-    // Pitch/amp tracker with transient detection
-    Synth(\tartiniTracker_sigmundStyle, [
-        \inChan, 0,
-        \freqBus, ~freqBus,
-        \ampBus, ~ampBus,
-        \lagAmpBus, ~lagAmpBus,
-        \trigBus, ~trigBus,
-        \holdLast, 1,
-        \onsetThreshold, 0.5
-    ]);
+    // Pitch/amp tracker with transient detection (polyphonic; mono pitch = most recent note)
+    ~tracker = ~polyTrackerNew.(s, (
+        inChan: 0,
+        freqBus: ~freqBus,
+        ampBus: ~ampBus,
+        lagAmpBus: ~lagAmpBus,
+        trigBus: ~trigBus,
+        synthArgs: [\holdLast, 1, \onsetThreshold, 0.5]
+    )).start;
 
     // OSC responder for audio transient triggers
     // OSCdef(\transientTrigger, { |msg|

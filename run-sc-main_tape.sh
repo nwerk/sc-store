@@ -46,6 +46,8 @@ trap cleanup SIGINT
 # 1. Kill all SuperCollider instances
 kill_processes "sclang"
 kill_processes "scsynth"
+# A leftover polyphonic pitch tracker normally exits together with sclang; make sure
+pkill -f "polytracker run" 2>/dev/null || true
 
 # 2. Kill all Pure Data (Pd) instances
 kill_processes "pd"

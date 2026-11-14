@@ -65,7 +65,7 @@ When creating a new main patch, load dependencies in this order:
 ("midi/mappings/<patch>_midi.scd").loadRelative;
 ("midi/midiconfig.scd").loadRelative;
 ("synths/<synth>.scd").loadRelative;
-("classes/inputtracker.scd").loadRelative;  // if pitch tracking is needed
+("classes/inputtracker.scd").loadRelative;  // if pitch tracking is needed; then inside s.waitForBoot: ~tracker = ~polyTrackerNew.(s, (freqBus: ~freqBus, ampBus: ~ampBus)).start
 ("classes/master.scd").loadRelative;        // if master output is needed
 ```
 

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Refuses a commit in which the TouchOSC layout, its version stamp, ui/main.xml and ui/ui_manifest.scd
+# disagree (fix: python3 ui/build.py, then add the ui/ files again).
+# Enable once per clone:  git config core.hooksPath .githooks
+if git diff --cached --name-only | grep -q '^ui/'; then
+    python3 ui/build.py --check || exit 1
+fi
