@@ -113,9 +113,8 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~touchOSC.sendMsg('/grain/timeStretch-label', ~timeStretchLabel.(allVals[~busNames[\timeStretch].index]));
 	~sendBufferLenLabel.(~bufferDurSec);
 
-	// Grain toggles
-	~sendToTouchOSC.('/grain/record',      ~recState.asInteger.asFloat);
-	~sendToTouchOSC.('/grain/liveMode',    ~liveMode.asInteger.asFloat);
+	// Recorder (REC button + status line) and grain toggles
+	~sendRecStatus.();
 	~sendToTouchOSC.('/grain/reverse',     ~reverseState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fixedPos',    ~fixedPosState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fftFreeze',   ~fftFreezeState.asInteger.asFloat);
@@ -191,32 +190,28 @@ OSCdef('/grain/timeStretch', { |msg|
 }, "/grain/timeStretch");
 
 // ---- Buffer length fader: directly reallocate buffer ----
+// A new buffer is empty: it is only allocated once the fader has rested for 0.4 s (not for every step
+// while it is dragged); the label follows the fader right away.
 OSCdef('/grain/bufferLen', { |msg|
 	var val = msg[1].clip(0.0, 1.0);
 	var durSec = val.linlin(0.0, 1.0, 0.1, 8.0);
 	~ccBuses.setAt(~busNames[\bufferLen].index, val);
 	~sendToTouchOSC.('/grain/bufferLen', val);
-	~allocBuffer !? { ~allocBuffer.(durSec) };
+	~sendBufferLenLabel.(durSec);
+	~bufferLenTask !? { ~bufferLenTask.stop };
+	~bufferLenTask = Routine({
+		0.4.wait;
+		~bufferLenTask = nil;
+		if ((durSec - ~bufferDurSec).abs > 0.001) { ~allocBuffer.(durSec) };
+	}).play(AppClock);
 }, "/grain/bufferLen");
 
 // ---- Grain toggle OSCdefs ----
+// All on/off buttons are toggle buttons on the tablet: the value IS the new state (1 = on, 0 = off), and
+// the state is sent back so the button always shows what the patch does.
 
-OSCdef('/grain/record', { |msg|
-	if (msg[1] >= 1.0) {
-		~recState = ~recState.not;
-		~rec.set(\recGate, ~recState.asInteger);
-		~sendToTouchOSC.('/grain/record', ~recState.asInteger.asFloat);
-		("Record: " ++ if(~recState, "ON", "OFF")).postln;
-	};
-}, "/grain/record");
-
-OSCdef('/grain/liveMode', { |msg|
-	var isOn = msg[1] >= 0.5;
-	if (isOn != ~liveMode) {
-		if (isOn) { ~startLiveMode.() } { ~stopLiveMode.() };
-	};
-	~sendToTouchOSC.('/grain/liveMode', isOn.asInteger.asFloat);
-}, "/grain/liveMode");
+// REC: the one switch of the recorder (main_multi.scd, ~setRecording)
+OSCdef('/grain/record', { |msg| ~setRecording.(msg[1] >= 0.5) }, "/grain/record");
 
 OSCdef('/grain/reverse', { |msg|
 	if (msg[1] >= 1.0) {
@@ -228,44 +223,39 @@ OSCdef('/grain/reverse', { |msg|
 }, "/grain/reverse");
 
 OSCdef('/grain/fixedPos', { |msg|
-	if (msg[1] >= 1.0) {
-		~fixedPosState = ~fixedPosState.not;
-		~g.set(\fixedPos, ~fixedPosState.asInteger);
-		~sendToTouchOSC.('/grain/fixedPos', ~fixedPosState.asInteger.asFloat);
-		("Fixed position: " ++ if(~fixedPosState, "ON", "OFF")).postln;
-	};
+	~fixedPosState = msg[1] >= 0.5;
+	~g.set(\fixedPos, ~fixedPosState.asInteger);
+	~sendToTouchOSC.('/grain/fixedPos', ~fixedPosState.asInteger.asFloat);
+	("Fixed position: " ++ if(~fixedPosState, "ON", "OFF")).postln;
 }, "/grain/fixedPos");
 
 OSCdef('/grain/densFromDur', { |msg|
-	if (msg[1] >= 1.0) {
-		~densFromDurState = ~densFromDurState.not;
-		~g.set(\densFromDurMode, ~densFromDurState.asInteger);
-		~sendToTouchOSC.('/grain/densFromDur', ~densFromDurState.asInteger.asFloat);
-		("Density from Duration: " ++ if(~densFromDurState, "ON", "OFF")).postln;
-	};
+	~densFromDurState = msg[1] >= 0.5;
+	~g.set(\densFromDurMode, ~densFromDurState.asInteger);
+	~sendToTouchOSC.('/grain/densFromDur', ~densFromDurState.asInteger.asFloat);
+	("Density from Duration: " ++ if(~densFromDurState, "ON", "OFF")).postln;
 }, "/grain/densFromDur");
 
 OSCdef('/grain/fftFreeze', { |msg|
-	if (msg[1] >= 1.0) {
-		~fftFreezeState = ~fftFreezeState.not;
-		~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
-		~sendToTouchOSC.('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat);
-		("FFT Freeze: " ++ if(~fftFreezeState, "ON", "OFF")).postln;
-	};
+	~fftFreezeState = msg[1] >= 0.5;
+	~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
+	~sendToTouchOSC.('/grain/fftFreeze', ~fftFreezeState.asInteger.asFloat);
+	("FFT Freeze: " ++ if(~fftFreezeState, "ON", "OFF")).postln;
 }, "/grain/fftFreeze");
 
 OSCdef('/grain/xyMode', { |msg|
-	if (msg[1] >= 1.0) {
-		~xyMode = ~xyMode.not;
+	var on = msg[1] >= 0.5;
+	if (on != ~xyMode) {
+		~xyMode = on;
 		if (~xyMode) {
 			~g !? { ~g.run(false) };
 		} {
 			5.do { |i| ~releaseXYVoice.(i) };
 			~g !? { ~g.run(true) };
 		};
-		~sendToTouchOSC.('/grain/xyMode', ~xyMode.asInteger.asFloat);
 		("XY Mode: " ++ if(~xyMode, "ON", "OFF")).postln;
 	};
+	~sendToTouchOSC.('/grain/xyMode', ~xyMode.asInteger.asFloat);
 }, "/grain/xyMode");
 
 // ---- Momentary OSCdefs ----
@@ -321,12 +311,13 @@ OSCdef('/grain/pitchReset', { |msg|
 	};
 }, "/grain/pitchReset");
 
+// CLEAR and LOAD SAMPLE: push buttons, act on the press
 OSCdef('/grain/deleteBuffer', { |msg|
-	if (msg[1] >= 1.0) { ~deleteBuffer.() };
+	if (msg[1] >= 0.5) { ~deleteBuffer.() };
 }, "/grain/deleteBuffer");
 
 OSCdef('/grain/loadSample', { |msg|
-	if (msg[1] >= 1.0) { { ~loadBuffer.(nil); }.defer };
+	if (msg[1] >= 0.5) { ~loadBuffer.(nil) };
 }, "/grain/loadSample");
 
 OSCdef('/grain/stopAudio', { |msg|

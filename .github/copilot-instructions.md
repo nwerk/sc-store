@@ -26,6 +26,7 @@ sc-store/
 │   ├── inputtracker.scd  # Polyphonic ML pitch tracker bridge (~polyTrackerNew) + onset/amp SynthDef
 │   └── master.scd        # Master output volume control
 ├── tracker/              # Polyphonic guitar pitch tracker (Python, see tracker/README.md)
+├── ui/                   # TouchOSC layout (main.tosc) + its version stamp / manifest (see ui/README.md)
 ├── config/
 │   └── serversetup.scd   # Platform-specific audio server config
 ├── launchers/

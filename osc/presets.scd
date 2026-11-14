@@ -105,7 +105,7 @@ if (File.exists(~presetDir).not) {
 
 	// Toggle states
 	data[\recState]      = ~recState.asInteger;
-	data[\liveMode]      = ~liveMode.asInteger;
+	data[\liveMode]      = (~liveMode ? false).asInteger;  // main_grain.scd only (main_multi: REC alone)
 	data[\reverseState]  = ~reverseState.asInteger;
 	data[\fixedPosState] = ~fixedPosState.asInteger;
 	data[\fftFreezeState]   = ~fftFreezeState.asInteger;
@@ -132,6 +132,7 @@ if (File.exists(~presetDir).not) {
 ~loadPreset = { |index|
 	var path = ~presetPath.(index);
 	var data = ~readPresetData.(path);
+	var presetLen;
 
 	if (data.notNil) {
 
@@ -147,8 +148,8 @@ if (File.exists(~presetDir).not) {
 		~onPresetFaders !? { ~onPresetFaders.(data[\faders]) };
 
 		// Restore toggle states
-		~recState      = data[\recState].asBoolean;
-		~liveMode      = data[\liveMode].asBoolean;
+		~recState      = (data[\recState] ? 0).asBoolean;
+		~liveMode      = (data[\liveMode] ? 0).asBoolean;
 		~reverseState  = data[\reverseState].asBoolean;
 		~fixedPosState = data[\fixedPosState].asBoolean;
 		~fftFreezeState   = (data[\fftFreezeState] ? data[\muteState] ? 0).asBoolean;
@@ -156,8 +157,13 @@ if (File.exists(~presetDir).not) {
 		~currentRate      = data[\currentRate] ? 1.0;
 
 		// Apply toggle states to synths
-		~rec.set(\recGate, ~recState.asInteger);
-		if (~liveMode) { ~startLiveMode.() } { ~stopLiveMode.() };
+		if (~setRecording.notNil) {
+			// main_multi.scd: REC is the only recorder switch; older presets kept "Live Mode" separately
+			~setRecording.(~recState or: { ~liveMode });
+		} {
+			~rec.set(\recGate, ~recState.asInteger);
+			if (~liveMode) { ~startLiveMode.() } { ~stopLiveMode.() };
+		};
 		~g.set(\reverseGrain, ~reverseState.asInteger);
 		~g.set(\fixedPos, ~fixedPosState.asInteger);
 		~ccBuses.setAt(~busNames[\fftFreeze].index, ~fftFreezeState.asInteger.asFloat);
@@ -169,11 +175,10 @@ if (File.exists(~presetDir).not) {
 			~updateChains !? { ~updateChains.() };
 		};
 
-		// Reallocate buffer to match the stored length
-		// (must be after toggle states so ~recState/~liveMode are already restored)
-		~allocBuffer.(
-			(data[\faders][~busNames[\bufferLen].index] ? 0.5).linlin(0.0, 1.0, 0.1, 8.0)
-		);
+		// Reallocate the buffer if the stored length differs (a new buffer is empty: the same length keeps
+		// the recorded loop). After the toggle states, so the recording state is already restored.
+		presetLen = (data[\faders][~busNames[\bufferLen].index] ? 0.5).linlin(0.0, 1.0, 0.1, 8.0);
+		if ((presetLen - ~bufferDurSec).abs > 0.001) { ~allocBuffer.(presetLen) };
 
 		~activePreset = index;
 		~presetDirty = false;

@@ -4,6 +4,8 @@
 # ============================================================
 # Kills running SuperCollider / Pd instances, makes sure JACK runs on the right audio interface, tells the
 # patch where the TouchOSC tablet is (TOUCHOSC_IP) and starts main_multi.scd with sclang. Ctrl+C stops it.
+# While the patch runs, the tablet layout of this checkout is served at http://<this machine>:8080/main.tosc
+# (UI_HTTP_PORT, 0 = off): open it in the tablet's browser to load the matching layout into TouchOSC.
 #
 #   ./run-sc-main_multi.sh
 #   TOUCHOSC_IP=192.168.0.50 ./run-sc-main_multi.sh     # settings already in the environment win
@@ -39,7 +41,9 @@ fi
 : "${JACK_RATE:=48000}"                 # must match s.options.sampleRate in config/serversetup.scd
 : "${JACK_PERIOD:=256}"
 : "${JACK_NPERIODS:=2}"
+: "${UI_HTTP_PORT:=8080}"               # serves ui/main.tosc to the tablet; 0 = off
 export TOUCHOSC_IP                      # read by osc/oscconfig_multi.scd
+export UI_HTTP_PORT                     # read by osc/ui_version.scd (for its hints)
 # ============================================================
 
 if [[ "$ON_PI" -eq 1 ]]; then
@@ -116,6 +120,46 @@ stop_desktop_jack() {
     fi
 }
 
+# ---- Tablet layout server ----
+# Serves ui/ of this checkout, so the layout the tablet downloads always belongs to the code that runs.
+UI_HTTP_PID=""
+start_ui_server() {
+    if [[ "$UI_HTTP_PORT" == "0" ]]; then
+        return
+    fi
+    if ! command -v python3 &>/dev/null; then
+        echo "python3 not found: the tablet layout is not served."
+        return
+    fi
+    # a server left over from a crashed run would keep the port
+    pkill -f "http.server $UI_HTTP_PORT --directory $REPO/ui" 2>/dev/null || true
+    local log="${XDG_RUNTIME_DIR:-/tmp}/sc-store-ui-http.log"
+    python3 -B -m http.server "$UI_HTTP_PORT" --directory "$REPO/ui" >"$log" 2>&1 &
+    UI_HTTP_PID=$!
+    sleep 0.5
+    if ! kill -0 "$UI_HTTP_PID" 2>/dev/null; then
+        echo "Warning: the tablet layout server did not start (port $UI_HTTP_PORT in use?): $(tail -n 1 "$log")"
+        UI_HTTP_PID=""
+        return
+    fi
+    # addresses the tablet can reach: IPv4 of the real interfaces (not Docker / VM bridges)
+    local iface ip
+    while read -r iface ip; do
+        case "$iface" in docker*|br-*|veth*|virbr*|lo) continue ;; esac
+        echo "Tablet start page: http://${ip%/*}:$UI_HTTP_PORT/   (layout: .../main.tosc, log: $log)"
+    done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}')
+    if systemctl is-active --quiet ufw 2>/dev/null; then
+        echo "Note: the ufw firewall is active. If the tablet gets a timeout, allow the port once:"
+        echo "      sudo ufw allow proto tcp from 192.168.0.0/16 to any port $UI_HTTP_PORT"
+    fi
+}
+stop_ui_server() {
+    if [[ -n "$UI_HTTP_PID" ]]; then
+        kill "$UI_HTTP_PID" 2>/dev/null || true
+        UI_HTTP_PID=""
+    fi
+}
+
 # Function to handle cleanup on exit
 cleanup() {
     echo ""
@@ -130,6 +174,7 @@ cleanup() {
         pkill -x scsynth 2>/dev/null || true
         pkill -f "polytracker run" 2>/dev/null || true
     fi
+    stop_ui_server
     restore_pi_jack
     stop_desktop_jack
     exit 1
@@ -254,6 +299,8 @@ if [[ ! -f "$SCLANG_SCRIPT" ]]; then
     exit 1
 fi
 
+start_ui_server
+
 echo "Starting SuperCollider script: $SCLANG_SCRIPT (TouchOSC tablet: $TOUCHOSC_IP)"
 # Start sclang with the script in the background
 sclang "$SCLANG_SCRIPT" &
@@ -266,6 +313,7 @@ SCLANG_STATUS=0
 wait "$SCLANG_PID" || SCLANG_STATUS=$?
 echo "SuperCollider exited (status $SCLANG_STATUS)."
 
+stop_ui_server
 restore_pi_jack
 stop_desktop_jack
 

@@ -331,9 +331,6 @@ s.waitForBoot {
 	~setMasterVol.(1.0);
 
 	// ---- State variables for grain toggles ----
-	~recState       = false;
-	~liveMode       = false;
-	~liveRoutine    = nil;
 	~reverseState   = false;
 	~fixedPosState  = false;
 	~fftFreezeState = false;
@@ -352,54 +349,106 @@ s.waitForBoot {
 		~xyVoices.do { |v| v !? { v.set(\maxDensHz, capHz) } };
 	};
 
-	// ---- Buffer management functions ----
+	// ============================================================
+	// Recorder: the grain buffer
+	// ============================================================
+	// The buffer is a loop of ~bufferDurSec seconds; the write head runs through it all the time.
+	//   REC on  (recording): the grain input is written into the loop. Overdub: the Feedback fader sets how
+	//                        much of the old content stays. Grains and XY voices follow just behind the head.
+	//   REC off (holding):   nothing is written, the loop keeps playing. XY voices play fixed positions.
+	// One switch: the tablet's REC button (/grain/record). CLEAR empties the loop, LOAD SAMPLE puts the next
+	// file of samples/ into it (and switches REC off, so the sample is not overwritten right away).
+	// The tablet's status line (/grain/recStatus) says what the loop holds: RECORDING / LOOP / SAMPLE / EMPTY.
+	~recState      = false;
+	~bufferContent = \empty;   // \empty | \recorded | \sample (status line only)
+	~sampleName    = nil;
+	~samplesDir    = ~basePath ++ "samples/";
+	~sampleIndex   = -1;
+	~sampleExtensions = #["wav", "aif", "aiff", "flac", "ogg"];
 
-	~loadBuffer = { |path|
-		if (path.notNil) {
-			b.free;
-			b = Buffer.readChannel(s, path, channels: [0], action: { |buf|
-				("Buffer loaded: " ++ path ++ " (" ++ buf.numFrames ++ " frames)").postln;
-				~ptr.set(\buf, buf);
-				~rec.set(\buf, buf);
-				~g.set(\buf, buf);
-			});
-		} {
-			Dialog.openPanel({ |path| ~loadBuffer.(path); });
+	~sendRecStatus = {
+		var len = ~bufferDurSec.round(0.1).asString ++ " s";
+		var text = case
+			{ ~recState } { "RECORDING  " ++ len }
+			{ ~bufferContent == \sample } { (~sampleName ? "sample").keep(16) ++ "  " ++ len }
+			{ ~bufferContent == \recorded } { "LOOP  " ++ len }
+			{ "EMPTY  " ++ len };
+		~touchOSC !? {
+			~touchOSC.sendMsg('/grain/record', ~recState.asInteger.asFloat);
+			~touchOSC.sendMsg('/grain/recStatus', text);
 		};
+	};
+
+	~setRecording = { |on|
+		~recState = on;
+		~rec.set(\recGate, on.asInteger);
+		if (on) { ~bufferContent = \recorded; ~sampleName = nil };
+		~sendRecStatus.();
+		("Record: " ++ if (on, "ON", "OFF (holding the loop)")).postln;
+	};
+
+	// Point every reader / writer at a new buffer, then free the old one
+	~switchBuffer = { |buf|
+		var old = b;
+		b = buf;
+		~ptr.set(\buf, buf);
+		~rec.set(\buf, buf);
+		~g.set(\buf, buf);
+		~xyVoices.do { |v| v !? { v.set(\buf, buf) } };
+		if (old.notNil and: { old != buf }) { s.sendBundle(0.2, old.freeMsg) };  // after the readers moved
+		~bufferDurSec = buf.duration;
 	};
 
 	~deleteBuffer = {
 		b.zero;
+		~bufferContent = if (~recState) { \recorded } { \empty };
+		~sampleName = nil;
+		~sendRecStatus.();
 		"Buffer cleared.".postln;
 	};
 
+	// path: a sound file; nil = the next file in samples/ (in alphabetical order, starts over at the end)
+	~loadBuffer = { |path|
+		var files;
+		if (path.isNil) {
+			files = if (File.exists(~samplesDir)) {
+				PathName(~samplesDir).files.select { |f| ~sampleExtensions.includesEqual(f.extension.toLower) }
+					.sort { |f1, f2| f1.fileName < f2.fileName }
+			} { [] };
+			if (files.isEmpty) {
+				~touchOSC !? { ~touchOSC.sendMsg('/grain/recStatus', "no files in samples/") };
+				("No sound files in " ++ ~samplesDir).warn;
+			} {
+				~sampleIndex = (~sampleIndex + 1) % files.size;
+				path = files[~sampleIndex].fullPath;
+			};
+		};
+		path !? {
+			~setRecording.(false);
+			Buffer.readChannel(s, path, channels: [0], action: { |buf|
+				~switchBuffer.(buf);
+				~bufferContent = \sample;
+				~sampleName = PathName(path).fileNameWithoutExtension;
+				~sendBufferLenLabel !? { ~sendBufferLenLabel.(~bufferDurSec) };
+				~sendRecStatus.();
+				("Sample loaded: % (% s)".format(path, ~bufferDurSec.round(0.01))).postln;
+			});
+		};
+	};
+
+	// New, empty buffer of durSec seconds; REC stays as it is
 	~allocBuffer = { |durSec|
-		var wasRecording = ~recState, wasLiveMode = ~liveMode;
 		durSec = durSec ? ~bufferDurSec;
-		~bufferDurSec = durSec;
-		~rec.set(\recGate, 0);
-		b.free;
-		b = Buffer.alloc(s, s.sampleRate * durSec, 1, completionMessage: { |buf|
-			~ptr.set(\buf, buf);
-			~rec.set(\buf, buf);
-			~g.set(\buf, buf);
-			if (wasRecording || wasLiveMode) { ~rec.set(\recGate, 1) };
-			("Buffer allocated: " ++ durSec ++ "s (" ++ buf.numFrames ++ " frames)").postln;
+		fork {
+			var buf = Buffer.alloc(s, (s.sampleRate * durSec).round.asInteger, 1);
+			s.sync;
+			~switchBuffer.(buf);
+			~bufferContent = if (~recState) { \recorded } { \empty };
+			~sampleName = nil;
 			~sendBufferLenLabel !? { ~sendBufferLenLabel.(durSec) };  // the label; the fader keeps its 0..1 value
-		});
-	};
-
-	// ---- Live mode ----
-	~startLiveMode = {
-		~liveMode = true;
-		~rec.set(\recGate, 1);
-		"Live mode ON".postln;
-	};
-
-	~stopLiveMode = {
-		~liveMode = false;
-		~rec.set(\recGate, 0);
-		"Live mode OFF".postln;
+			~sendRecStatus.();
+			("Buffer allocated: " ++ durSec.round(0.01) ++ " s (" ++ buf.numFrames ++ " frames)").postln;
+		};
 	};
 
 	// ---- MultiXY voice management ----
@@ -429,7 +478,7 @@ s.waitForBoot {
 				\maxDensHz,   spawnCap,
 			];
 			if (~xyVoices[idx].isNil) {
-				~xyVoices[idx] = if (~liveMode) {
+				~xyVoices[idx] = if (~recState) {
 					Synth(\gran, commonArgs ++ [
 						\fixedPos,       0,
 						\fixedPosRand,   0,
@@ -445,7 +494,7 @@ s.waitForBoot {
 					], ~granGrp)
 				};
 			} {
-				if (~liveMode) {
+				if (~recState) {
 					~xyVoices[idx].set(
 						\fixedPosSec,    posSec,
 						\baseDur,        dur,
@@ -479,6 +528,8 @@ s.waitForBoot {
 	// ---- OSC control layer ----
 	thisProcess.interpreter.executeFile(~basePath ++ "osc/oscconfig_multi.scd");
 	thisProcess.interpreter.executeFile(~basePath ++ "osc/presets.scd");
+	// Tablet layout version check (needs every OSCdef registered, so after presets.scd)
+	thisProcess.interpreter.executeFile(~basePath ++ "osc/ui_version.scd");
 
 	// ---- Boot sync: send state to TouchOSC ----
 	AppClock.sched(0.5, {
