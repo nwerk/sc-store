@@ -9,8 +9,8 @@
 //       grain focused → ~setMasterVol (CC 11 + TouchOSC)
 //       tape focused  → CC 96 bus slot + /tape/volume
 //       cembalo focused → cembalo volume (~setCembaloParam, CC 100 + /cembalo/volume)
-//   - Footswitches CC 80/81/82 dispatch to ~midiDispatch stubs.
-//     Stubs are no-ops; add logic there when needed.
+//   - Footswitches CC 80/81/82: granular on/off, next preset, tape + cembalo on/off
+//     (see ~footswitchActions below).
 //
 // Requires: ~busNames (osc_mappings_multi.scd)
 // ============================================================
@@ -98,37 +98,39 @@ MIDIdef.cc(\expressionPedalMasterVol,
 	ccNum: 11
 );
 
-// ---- Footswitch dispatch (context-sensitive, no-op stubs) ----
-// Populate ~midiDispatch to add per-synth footswitch actions later.
-~midiDispatch = (
-	grain: (
-		cc80: { "FS CC80 (grain): no action".postln },
-		cc81: { "FS CC81 (grain): no action".postln },
-		cc82: { "FS CC82 (grain): no action".postln },
-	),
-	tape: (
-		cc80: { "FS CC80 (tape): no action".postln },
-		cc81: { "FS CC81 (tape): no action".postln },
-		cc82: { "FS CC82 (tape): no action".postln },
-	),
-	cembalo: (
-		cc80: { "FS CC80 (cembalo): no action".postln },
-		cc81: { "FS CC81 (cembalo): no action".postln },
-		cc82: { "FS CC82 (cembalo): no action".postln },
-	),
+// ---- Boss FS-1-WL footswitches ----
+// The three switches send CC 80 / 81 / 82 (127 on press). If left and right are swapped on your unit,
+// swap the CC numbers in ~footswitchCC.
+//   left   : granular on / off
+//   middle : next stored preset (steps through the occupied slots, wraps around)
+//   right  : tape synth + cembalo on / off together (if either is on, both go off)
+// The expression pedal keeps its current target (the footswitch does not change ~focusedSynth).
+~footswitchCC = (left: 80, middle: 81, right: 82);
+~footswitchActions = (
+	left: {
+		~setSynthEnabled !? { ~setSynthEnabled.(\grain, ~synthEnabled[\grain].not, false) };
+	},
+	middle: {
+		~loadNextPreset !? { ~loadNextPreset.() };
+	},
+	right: {
+		var on = (~synthEnabled[\tape] or: { ~synthEnabled[\cembalo] }).not;
+		~setSynthEnabled !? {
+			~setSynthEnabled.(\tape, on, false);
+			~setSynthEnabled.(\cembalo, on, false);
+		};
+	},
 );
 
-MIDIdef.cc(\fs1wl_80, { |val|
-	if (val == 127) { ~midiDispatch[~focusedSynth][\cc80].() }
-}, ccNum: 80);
-
-MIDIdef.cc(\fs1wl_81, { |val|
-	if (val == 127) { ~midiDispatch[~focusedSynth][\cc81].() }
-}, ccNum: 81);
-
-MIDIdef.cc(\fs1wl_82, { |val|
-	if (val == 127) { ~midiDispatch[~focusedSynth][\cc82].() }
-}, ccNum: 82);
+~footswitchCC.keysValuesDo { |name, cc|
+	MIDIdef.cc(("fs1wl_" ++ name).asSymbol, { |val|
+		// only once the patch is up (the actions need the server and the OSC layer)
+		if (val == 127 and: { ~synthEnabled.notNil }) {
+			("Footswitch " ++ name).postln;
+			~footswitchActions[name].value;
+		};
+	}, ccNum: cc);
+};
 
 "MIDI config (multi) loaded.".postln;
 )

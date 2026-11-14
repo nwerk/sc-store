@@ -83,6 +83,16 @@ s.waitForBoot {
 	~ccBuses = Bus.control(s, 128);
 	~ccBuses.setn(Array.fill(128, 0.0));
 
+	// ---- Tape synth starting sound (CC 90–96), so it plays without the tablet (footswitch) ----
+	// A soft, slightly wobbly sine/saw pad under the cembalo. master 0.1 puts its level (RMS) about level with the
+	// cembalo's (measured with a strummed test signal; at 0.35 the tape was 14 dB louder and covered the plucks).
+	// A preset that contains tape values replaces these.
+	~tapeDefaults = (
+		badness: 0.12, wavemix: 0.35, wavemap: 0.15, badnessmap: 0.1,
+		reverb_mix: 0.35, reverb_room: 0.75, master: 0.1
+	);
+	~tapeDefaults.keysValuesDo { |k, v| ~ccBuses.setAt(~busNames[k].index, v) };
+
 	// ---- Audio buses ----
 	~micBus      = Bus.audio(s, 1);   // mono microphone input
 	~grainSrcBus = Bus.audio(s, 1);   // selected sources (guitar / cembalo / tape) → \rec + FFT freeze
@@ -212,9 +222,10 @@ s.waitForBoot {
 		decay:  ControlSpec(0.5, 10, \exp),  // ring time of a 220 Hz note (s)
 		revMix: ControlSpec(0, 1),           room:   ControlSpec(0, 1),
 	);
-	// defaults in real units (as in main_cembalo.scd)
-	~cembaloDefaults = (volume: 0.8, bright: 0.1, noise: 0.7, warmth: 0.9, weird: 0.5, octave: 0.25,
-		decay: 3.0, revMix: 0.22, room: 0.89);
+	// defaults in real units
+	// (blended with ~tapeDefaults: the cembalo plays the attacks, the tape synth the sustained bed)
+	~cembaloDefaults = (volume: 1.0, bright: 0.2, noise: 0.55, warmth: 0.8, weird: 0.35, octave: 0.3,
+		decay: 3.5, revMix: 0.25, room: 0.8);
 	~cembaloNorm = ();  // current normalised fader values (language-side mirror of CC 100–108)
 
 	~cembalo = ~cembaloNew.(s, ~tartini, (
@@ -374,7 +385,7 @@ s.waitForBoot {
 			~g.set(\buf, buf);
 			if (wasRecording || wasLiveMode) { ~rec.set(\recGate, 1) };
 			("Buffer allocated: " ++ durSec ++ "s (" ++ buf.numFrames ++ " frames)").postln;
-			~sendToTouchOSC !? { ~sendToTouchOSC.('/grain/bufferLen', durSec.asFloat) };
+			~sendBufferLenLabel !? { ~sendBufferLenLabel.(durSec) };  // the label; the fader keeps its 0..1 value
 		});
 	};
 
@@ -472,13 +483,13 @@ s.waitForBoot {
 	// ---- Boot sync: send state to TouchOSC ----
 	AppClock.sched(0.5, {
 		if (s.serverRunning) {
-			if (~presetExists.(0)) { ~loadPreset.(0) } { ~sendAllState.() };
+			if (~loadPreset.(0).not) { ~sendAllState.() };  // missing or damaged preset 0: plain state
 		};
 		nil;
 	});
 	AppClock.sched(3.0, {
 		if (s.serverRunning) {
-			if (~presetExists.(0)) { ~loadPreset.(0) } { ~sendAllState.() };
+			if (~loadPreset.(0).not) { ~sendAllState.() };  // missing or damaged preset 0: plain state
 		};
 		nil;
 	});

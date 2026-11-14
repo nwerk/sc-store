@@ -137,7 +137,9 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 		var home = abs.(o[\home]), py = abs.(o[\python] ? (home +/+ ".venv/bin/python"));
 		var cmd;
 		if(File.exists(py).not) { py = "python3" };
-		cmd = "cd % && exec % -m polytracker run --input % --scsynth 127.0.0.1:% --lang 127.0.0.1:% --bus % --voices % --control-port % --mono-mode % --parent-pid %".format(
+		// -B: write no bytecode caches (__pycache__/*.pyc). A .pyc half-written at a power loss can make Python
+		// fail to start ("bad marshal data"); without caches nothing is written while the patch runs.
+		cmd = "cd % && exec % -B -m polytracker run --input % --scsynth 127.0.0.1:% --lang 127.0.0.1:% --bus % --voices % --control-port % --mono-mode % --parent-pid %".format(
 			home.shellQuote, py.shellQuote,
 			(o[\jackPort] ? ("system:capture_" ++ (o[\inChan] + 1))).shellQuote,
 			s.addr.port, NetAddr.langPort, self[\block].index, o[\voices], o[\controlPort], o[\monoMode], thisProcess.pid);
