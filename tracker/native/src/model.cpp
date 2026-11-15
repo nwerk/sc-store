@@ -79,6 +79,10 @@ void conv_rows(const float* w, const float* b, Rows x, float* out, int rows, int
 PitchNet PitchNet::load(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open model " + path);
+    return load(f, path);
+}
+
+PitchNet PitchNet::load(std::istream& f, const std::string& path) {
     PitchNet net;
     std::string line;
     if (!std::getline(f, line) || line != "polytracker-model 1")

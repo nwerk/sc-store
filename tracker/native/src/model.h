@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cmath>
+#include <istream>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,8 @@ class PitchNet {
 public:
     // Loads a .ptm written by native/export_model.py; throws std::runtime_error.
     static PitchNet load(const std::string& path);
+    // The same from an open binary stream (a model compiled into a plugin); `path` only names it in errors.
+    static PitchNet load(std::istream& f, const std::string& path);
 
     // x [n_channels][n_fine] -> probabilities [2][n_pitch] (frame head, onset head).
     // The returned pointer is valid until the next call.
