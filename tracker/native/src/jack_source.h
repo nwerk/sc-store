@@ -43,6 +43,7 @@ public:
         sym(connect_, "jack_connect");
         sym(get_ports_, "jack_get_ports");
         sym(free_, "jack_free");
+        rt_priority_ = reinterpret_cast<int (*)(client_t*)>(dlsym(lib_, "jack_client_real_time_priority"));
 
         int status = 0;
         client_ = client_open_(client_name.c_str(), 0x01 /* JackNoStartServer */, &status);
@@ -114,6 +115,10 @@ public:
         read_.store(w, std::memory_order_release);
     }
 
+    // realtime priority of this client's JACK threads (the audio threads of scsynth have the same); -1 if JACK
+    // does not run with realtime scheduling or cannot tell
+    int rt_priority() const { return rt_priority_ && client_ ? rt_priority_(client_) : -1; }
+
     int sample_rate = 0, block_size = 0;
     std::atomic<int> xruns{0}, overruns{0};
     std::atomic<bool> shutdown{false};
@@ -164,6 +169,7 @@ private:
     int (*connect_)(client_t*, const char*, const char*) = nullptr;
     const char** (*get_ports_)(client_t*, const char*, const char*, unsigned long) = nullptr;
     void (*free_)(void*) = nullptr;
+    int (*rt_priority_)(client_t*) = nullptr;  // optional
 
     void* lib_ = nullptr;
     client_t* client_ = nullptr;

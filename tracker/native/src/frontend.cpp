@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 namespace pt {
@@ -26,6 +27,42 @@ float window_norm(const std::vector<float>& w) {
     return float(2.0 / float(s));
 }
 
+// The loops below are plain element-wise arithmetic on separate arrays, which the compiler vectorises.
+void window(const float* x, const float* w, float* out, int n) {
+    for (int i = 0; i < n; ++i) out[i] = x[i] * w[i];
+}
+
+void magnitude(const float* re, const float* im, float norm, float* out, int n) {
+    for (int i = 0; i < n; ++i) out[i] = std::sqrt(re[i] * re[i] + im[i] * im[i]) * norm;
+}
+
+void power(const float* re, const float* im, float* out, int n) {
+    for (int i = 0; i < n; ++i) out[i] = re[i] * re[i] + im[i] * im[i];
+}
+
+// Dot product with eight partial sums (one running sum is a chain of dependent additions; the wide filters of the
+// high grid bins have up to a few hundred taps).
+float dot(const float* a, const float* b, int n) {
+    simd::v8 acc = {0, 0, 0, 0, 0, 0, 0, 0};
+    int i = 0;
+    for (; i + 8 <= n; i += 8) acc += simd::load<simd::v8>(a + i) * simd::load<simd::v8>(b + i);
+    float s = ((acc[0] + acc[4]) + (acc[1] + acc[5])) + ((acc[2] + acc[6]) + (acc[3] + acc[7]));
+    for (; i < n; ++i) s += a[i] * b[i];
+    return s;
+}
+
+// Sum of squares in double precision. Eight partial sums: one running sum would be a chain of n dependent
+// additions, which no CPU can overlap.
+double sum_squares(const float* x, int n) {
+    double acc[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int i = 0;
+    for (; i + 8 <= n; i += 8)
+        for (int k = 0; k < 8; ++k) acc[k] += double(x[i + k]) * x[i + k];
+    double s = ((acc[0] + acc[4]) + (acc[1] + acc[5])) + ((acc[2] + acc[6]) + (acc[3] + acc[7]));
+    for (; i < n; ++i) s += double(x[i]) * x[i];
+    return s;
+}
+
 }  // namespace
 
 Frontend::Sparse Frontend::filterbank(int n_fft, int sr, const std::vector<double>& centers_hz, double step_ratio) {
@@ -33,17 +70,23 @@ Frontend::Sparse Frontend::filterbank(int n_fft, int sr, const std::vector<doubl
     const int n_bins = n_fft / 2 + 1;
     Sparse fb;
     for (double c : centers_hz) {
-        fb.start.push_back(int(fb.rows.size()));
+        fb.start.push_back(int(fb.weights.size()));
         const double half_up = std::max(c * (step_ratio - 1.0), bin_hz);
         const double half_dn = std::max(c * (1.0 - 1.0 / step_ratio), bin_hz);
+        int first = -1, last = -1;
         for (int r = 0; r < n_bins; ++r) {
             const double d = r * bin_hz - c;
             const float w = float(std::max(0.0, d >= 0 ? 1.0 - d / half_up : 1.0 + d / half_dn));
-            if (w != 0.0f) { fb.rows.push_back(r); fb.weights.push_back(w); }
+            if (w == 0.0f) continue;
+            if (first < 0) first = r;
+            else if (r != last + 1) throw std::runtime_error("filter with a gap");
+            last = r;
+            fb.weights.push_back(w);
         }
-        if (int(fb.rows.size()) == fb.start.back()) throw std::runtime_error("empty filter");
+        if (first < 0) throw std::runtime_error("empty filter");
+        fb.first.push_back(first);
     }
-    fb.start.push_back(int(fb.rows.size()));
+    fb.start.push_back(int(fb.weights.size()));
     return fb;
 }
 
@@ -66,14 +109,11 @@ Frontend::Frontend(const FrontendConfig& c)
 
     // fine bin j is centred on MIDI pitch_lo + (j - 1) / bps, i.e. bin 3*i+1 is pitch i
     const int base = (cfg.pitch_lo - cfg.grid_lo) * bps - 1;
-    stack_idx_.resize(size_t(cfg.n_harmonics) * nf);
+    stack_first_.resize(cfg.n_harmonics);
     for (int h = 0; h < cfg.n_harmonics; ++h) {
         const int off = int(pyround(12.0 * bps * std::log2(h + 1.0)));
-        for (int j = 0; j < nf; ++j) {
-            const int idx = base + j + off;
-            if (idx < 0 || idx >= cfg.n_grid()) throw std::runtime_error("grid too small for stack");
-            stack_idx_[size_t(h) * nf + j] = idx;
-        }
+        if (base + off < 0 || base + off + nf > cfg.n_grid()) throw std::runtime_error("grid too small for stack");
+        stack_first_[h] = base + off;
     }
     const int K = cfg.acf_multiples;
     acf_i0_.resize(size_t(K) * nf);
@@ -94,7 +134,11 @@ Frontend::Frontend(const FrontendConfig& c)
 
     const int n_max = std::max({n_long, n_short, 2 * n_acf});
     tmp_.resize(n_max);
-    spec_.resize(n_max / 2 + 1);
+    spec_re_.resize(n_max / 2 + 1);
+    spec_im_.resize(n_max / 2 + 1);
+    norm_l_.resize(cfg.n_grid());
+    norm_s_.resize(cfg.n_grid());
+    norm_d_.resize(cfg.n_grid());
     db_long_.resize(cfg.n_grid());
     db_prev_.resize(cfg.n_grid());
     mag_short_.resize(n_short / 2 + 1);
@@ -103,18 +147,14 @@ Frontend::Frontend(const FrontendConfig& c)
 
 void Frontend::apply(const Sparse& fb, const float* mag, float* db) const {
     const int n = int(fb.start.size()) - 1;
-    for (int g = 0; g < n; ++g) {
-        float acc = 0.0f;
-        for (int i = fb.start[g]; i < fb.start[g + 1]; ++i) acc += mag[fb.rows[i]] * fb.weights[i];
-        db[g] = 20.0f * std::log10(acc + 1e-7f);
-    }
+    for (int g = 0; g < n; ++g)
+        db[g] = 20.0f * std::log10(dot(mag + fb.first[g], &fb.weights[fb.start[g]], fb.start[g + 1] - fb.start[g]) + 1e-7f);
 }
 
 void Frontend::short_db(const float* seg, float* db) {
-    for (int i = 0; i < n_short; ++i) tmp_[i] = seg[i] * w_short_[i];
-    fft_short_.forward(tmp_.data(), spec_.data());
-    for (int i = 0; i <= n_short / 2; ++i)
-        mag_short_[i] = std::sqrt(spec_[i].re * spec_[i].re + spec_[i].im * spec_[i].im) * norm_short_;
+    window(seg, w_short_.data(), tmp_.data(), n_short);
+    fft_short_.forward(tmp_.data(), spec_re_.data(), spec_im_.data());
+    magnitude(spec_re_.data(), spec_im_.data(), norm_short_, mag_short_.data(), n_short / 2 + 1);
     apply(fb_short_, mag_short_.data(), db);
 }
 
@@ -127,10 +167,9 @@ void Frontend::compute(const float* hist, const float* db_prev, Features& out) {
 
     // long window spectrum
     const float* long_seg = hist + history - n_long;
-    for (int i = 0; i < n_long; ++i) tmp_[i] = long_seg[i] * w_long_[i];
-    fft_long_.forward(tmp_.data(), spec_.data());
-    for (int i = 0; i <= n_long / 2; ++i)
-        out.mag_long[i] = std::sqrt(spec_[i].re * spec_[i].re + spec_[i].im * spec_[i].im) * norm_long_;
+    window(long_seg, w_long_.data(), tmp_.data(), n_long);
+    fft_long_.forward(tmp_.data(), spec_re_.data(), spec_im_.data());
+    magnitude(spec_re_.data(), spec_im_.data(), norm_long_, out.mag_long.data(), n_long / 2 + 1);
     apply(fb_long_, out.mag_long.data(), db_long_.data());
 
     // short window now, and delta samples earlier (unless the caller kept it from that frame)
@@ -147,28 +186,28 @@ void Frontend::compute(const float* hist, const float* db_prev, Features& out) {
         ref_s = std::max(ref_s, out.db_short[g]);
     }
 
-    // stacks: s_long, s_short and d_spec gathered at the harmonics of every candidate pitch
+    // stacks: s_long, s_short and d_spec gathered at the harmonics of every candidate pitch. Each grid bin is
+    // gathered by several harmonics, so the three values are computed once per grid bin first.
+    for (int g = 0; g < ng; ++g) {
+        norm_l_[g] = std::clamp((db_long_[g] - ref_l + R) / R, 0.0f, 1.0f);
+        norm_s_[g] = std::clamp((out.db_short[g] - ref_s + R) / R, 0.0f, 1.0f);
+        norm_d_[g] = std::clamp((std::max(out.db_short[g], -90.0f) - std::max(db_prev[g], -90.0f)) / 20.0f, -1.0f, 1.0f);
+    }
     float* x = out.x.data();
     for (int h = 0; h < H; ++h) {
-        const int* idx = &stack_idx_[size_t(h) * nf];
-        float* xl = x + size_t(h) * nf;
-        float* xs = x + size_t(H + h) * nf;
-        float* xd = x + size_t(2 * H + h) * nf;
-        for (int j = 0; j < nf; ++j) {
-            const int g = idx[j];
-            xl[j] = std::clamp((db_long_[g] - ref_l + R) / R, 0.0f, 1.0f);
-            xs[j] = std::clamp((out.db_short[g] - ref_s + R) / R, 0.0f, 1.0f);
-            xd[j] = std::clamp((std::max(out.db_short[g], -90.0f) - std::max(db_prev[g], -90.0f)) / 20.0f, -1.0f, 1.0f);
-        }
+        const int g = stack_first_[h];
+        std::memcpy(x + size_t(h) * nf, &norm_l_[g], sizeof(float) * nf);
+        std::memcpy(x + size_t(H + h) * nf, &norm_s_[g], sizeof(float) * nf);
+        std::memcpy(x + size_t(2 * H + h) * nf, &norm_d_[g], sizeof(float) * nf);
     }
 
     // normalised autocorrelation (zero-padded FFT), sampled at the pitch period and its multiples
     const float* acf_seg = hist + history - n_acf;
-    for (int i = 0; i < n_acf; ++i) tmp_[i] = acf_seg[i] * w_acf_[i];
+    window(acf_seg, w_acf_.data(), tmp_.data(), n_acf);
     std::fill(tmp_.begin() + n_acf, tmp_.begin() + 2 * n_acf, 0.0f);
-    fft_acf_.forward(tmp_.data(), spec_.data());
-    for (int i = 0; i <= n_acf; ++i) spec_[i] = {spec_[i].re * spec_[i].re + spec_[i].im * spec_[i].im, 0.0f};
-    fft_acf_.inverse(spec_.data(), r_.data());
+    fft_acf_.forward(tmp_.data(), spec_re_.data(), spec_im_.data());
+    power(spec_re_.data(), spec_im_.data(), spec_re_.data(), n_acf + 1);
+    fft_acf_.inverse(spec_re_.data(), nullptr, r_.data());
     const float r0 = r_[0] + 1e-9f;
     float* xa = x + size_t(3 * H) * nf;
     for (int m = 0; m < K; ++m)
@@ -179,9 +218,9 @@ void Frontend::compute(const float* hist, const float* db_prev, Features& out) {
         }
 
     // levels
-    double sl = 0.0, ss = 0.0;
-    for (int i = 0; i < n_long; ++i) sl += double(long_seg[i]) * long_seg[i];
-    for (int i = 0; i < n_short; ++i) ss += double(short_now[i]) * short_now[i];
+    // the short window is the end of the long one, so its samples are summed once
+    const double ss = sum_squares(short_now, n_short);
+    const double sl = n_long >= n_short ? sum_squares(long_seg, n_long - n_short) + ss : sum_squares(long_seg, n_long);
     const double rms_db = 20.0 * std::log10(std::sqrt(sl / n_long + 1e-12));
     const double rms_s_db = 20.0 * std::log10(std::sqrt(ss / n_short + 1e-12));
     out.rms_db = float(rms_db);

@@ -1,5 +1,7 @@
 #include "model.h"
 
+#include "fft.h"  // simd vector types
+
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -10,48 +12,65 @@ namespace pt {
 
 namespace {
 
-// Register-blocked GEMM: out[o][l] = b[o] + sum_j w[o][j] * col[j][l].
-// An 8 x 8 tile of outputs stays in registers while j runs over the whole reduction (AVX2: 8 registers,
-// NEON: 16), so every col value is loaded once per eight output rows and nothing is written until the end.
-// wp: weights packed per block of 8 rows as [block][j][8]; col rows have stride lp (a multiple of 8,
-// zero-padded); out has row stride L.
-constexpr int RB = 8, LB = 8;
+// Convolution as a register-blocked matrix product: out[o][l] = b[o] + sum_j w[o][j] * x_j[l], where x_j is
+// input channel c at tap t (j = t * c_in + c), i.e. the input row shifted by t * dilation.
+// A tile of 8 outputs x W positions stays in registers while j runs over the whole reduction, so every input value
+// is loaded once per eight output rows and nothing is written until the end.
+// The rows x_j are read in place from the zero-padded input (no im2col copy): `inner` rows `stride` floats apart,
+// repeated `outer` times `step` floats further on. A stride-1 layer has outer = k taps, inner = c_in channels; a
+// strided layer reads its im2col matrix with outer = 1. Per layer, input (20 kB) and one block of weights (6 kB)
+// then fit a 32 kB L1 cache (Raspberry Pi 4) together.
+// wp: weights packed per block of 8 rows as [block][j][8]; out has row stride L.
+constexpr int RB = 8;
 
-// 8 floats; GCC/Clang lower this to one AVX register or two NEON registers
-typedef float v8 __attribute__((vector_size(32)));
+// Positions per tile. 8 floats are one AVX register or two NEON registers (AArch64 has 32 of them); elsewhere
+// (32-bit ARM, SSE: 16 registers) eight 4-float accumulators are what fits.
+#if defined(__AVX__) || defined(__aarch64__)
+typedef simd::v8 vt;
+#else
+typedef simd::v4 vt;
+#endif
+constexpr int LB = int(sizeof(vt) / sizeof(float));
 
-inline v8 load8(const float* p) { v8 v; std::memcpy(&v, p, sizeof v); return v; }
+struct Rows {
+    const float* base;
+    int outer, step, inner, stride;
+};
 
-void gemm_tile8(const float* wp, const float* b, const float* col, float* out, int kc, int L, int lp) {
+void conv_tile8(const float* wp, const float* b, Rows x, float* out, int L, int lp) {
     for (int l0 = 0; l0 < lp; l0 += LB) {
-        v8 a0 = b[0] + v8{}, a1 = b[1] + v8{}, a2 = b[2] + v8{}, a3 = b[3] + v8{};
-        v8 a4 = b[4] + v8{}, a5 = b[5] + v8{}, a6 = b[6] + v8{}, a7 = b[7] + v8{};
-        const float* c = col + l0;
+        vt a0 = b[0] + vt{}, a1 = b[1] + vt{}, a2 = b[2] + vt{}, a3 = b[3] + vt{};
+        vt a4 = b[4] + vt{}, a5 = b[5] + vt{}, a6 = b[6] + vt{}, a7 = b[7] + vt{};
         const float* w = wp;
-        for (int j = 0; j < kc; ++j, c += lp, w += RB) {
-            const v8 x = load8(c);
-            a0 += w[0] * x; a1 += w[1] * x; a2 += w[2] * x; a3 += w[3] * x;
-            a4 += w[4] * x; a5 += w[5] * x; a6 += w[6] * x; a7 += w[7] * x;
+        for (int t = 0; t < x.outer; ++t) {
+            const float* c = x.base + t * x.step + l0;
+            for (int j = 0; j < x.inner; ++j, c += x.stride, w += RB) {
+                const vt v = simd::load<vt>(c);
+                a0 += w[0] * v; a1 += w[1] * v; a2 += w[2] * v; a3 += w[3] * v;
+                a4 += w[4] * v; a5 += w[5] * v; a6 += w[6] * v; a7 += w[7] * v;
+            }
         }
-        const v8 acc[RB] = {a0, a1, a2, a3, a4, a5, a6, a7};
+        const vt acc[RB] = {a0, a1, a2, a3, a4, a5, a6, a7};
         const int n = L - l0 < LB ? L - l0 : LB;
         for (int r = 0; r < RB; ++r) {
-            if (n == LB) std::memcpy(out + r * L + l0, &acc[r], sizeof(v8));
+            if (n == LB) simd::store<vt>(out + r * L + l0, acc[r]);
             else for (int i = 0; i < n; ++i) out[r * L + l0 + i] = acc[r][i];
         }
     }
 }
 
 // rows that do not fill a block of 8 (the two output heads)
-void gemm_rows(const float* w, const float* b, const float* col, float* out, int rows, int kc, int L, int lp) {
+void conv_rows(const float* w, const float* b, Rows x, float* out, int rows, int L) {
     for (int r = 0; r < rows; ++r) {
         float* y = out + r * L;
         for (int l = 0; l < L; ++l) y[l] = b[r];
-        for (int j = 0; j < kc; ++j) {
-            const float a = w[r * kc + j];
-            const float* c = col + j * lp;
-            for (int l = 0; l < L; ++l) y[l] += a * c[l];
-        }
+        const float* wr = w + size_t(r) * x.outer * x.inner;
+        for (int t = 0; t < x.outer; ++t)
+            for (int j = 0; j < x.inner; ++j) {
+                const float a = *wr++;
+                const float* c = x.base + t * x.step + j * x.stride;
+                for (int l = 0; l < L; ++l) y[l] += a * c[l];
+            }
     }
 }
 
@@ -121,9 +140,11 @@ void PitchNet::plan() {
         Buf b;
         b.l_in = l_in;
         b.l_out = (l_in + 2 * l.pad - l.dilation * (l.k - 1) - 1) / l.stride + 1;
-        b.xpad.assign(size_t(l.c_in) * (l_in + 2 * l.pad), 0.0f);
         b.lp = (b.l_out + LB - 1) / LB * LB;
-        b.col.assign(size_t(l.k) * l.c_in * b.lp, 0.0f);  // padding columns stay zero
+        // the last tile reads up to lp - l_out positions past the input; they stay zero
+        b.row = l_in + 2 * l.pad + (b.lp - b.l_out);
+        b.xpad.assign(size_t(l.c_in) * b.row, 0.0f);
+        if (l.stride != 1) b.col.assign(size_t(l.k) * l.c_in * b.lp, 0.0f);  // padding columns stay zero
         const int kc = l.k * l.c_in, blocks = l.c_out / RB;
         b.wp.resize(size_t(blocks) * kc * RB);
         for (int ob = 0; ob < blocks; ++ob)
@@ -144,26 +165,27 @@ const float* PitchNet::predict_one(const float* x) {
     for (size_t i = 0; i < layers.size(); ++i) {
         const Layer& l = layers[i];
         Buf& b = bufs_[i];
-        const int lp = b.l_in + 2 * l.pad;
         for (int c = 0; c < l.c_in; ++c)
-            std::memcpy(&b.xpad[size_t(c) * lp + l.pad], h + size_t(c) * b.l_in, sizeof(float) * b.l_in);
+            std::memcpy(&b.xpad[size_t(c) * b.row + l.pad], h + size_t(c) * b.l_in, sizeof(float) * b.l_in);
         if (l.residual_in) { skip = h; skip_n = size_t(l.c_in) * b.l_in; }
-        // im2col, tap-major: col[t * c_in + c][j] = xpad[c][j * stride + t * dilation]
-        for (int t = 0; t < l.k; ++t)
-            for (int c = 0; c < l.c_in; ++c) {
-                float* dst = &b.col[(size_t(t) * l.c_in + c) * b.lp];
-                const float* src = &b.xpad[size_t(c) * lp + t * l.dilation];
-                if (l.stride == 1) std::memcpy(dst, src, sizeof(float) * b.l_out);
-                else for (int j = 0; j < b.l_out; ++j) dst[j] = src[j * l.stride];
-            }
+        Rows x{b.xpad.data(), l.k, l.dilation, l.c_in, b.row};
+        if (l.stride != 1) {
+            // im2col, tap-major: col[t * c_in + c][j] = xpad[c][j * stride + t * dilation]
+            for (int t = 0; t < l.k; ++t)
+                for (int c = 0; c < l.c_in; ++c) {
+                    float* dst = &b.col[(size_t(t) * l.c_in + c) * b.lp];
+                    const float* src = &b.xpad[size_t(c) * b.row + t * l.dilation];
+                    for (int j = 0; j < b.l_out; ++j) dst[j] = src[j * l.stride];
+                }
+            x = Rows{b.col.data(), 1, 0, l.k * l.c_in, b.lp};
+        }
         float* y = b.out.data();
         const int kc = l.k * l.c_in, blocks = l.c_out / RB;
         for (int ob = 0; ob < blocks; ++ob)
-            gemm_tile8(&b.wp[size_t(ob) * kc * RB], &l.b[ob * RB], b.col.data(), y + size_t(ob) * RB * b.l_out, kc,
-                       b.l_out, b.lp);
+            conv_tile8(&b.wp[size_t(ob) * kc * RB], &l.b[ob * RB], x, y + size_t(ob) * RB * b.l_out, b.l_out, b.lp);
         if (const int rest = l.c_out - blocks * RB)
-            gemm_rows(&l.w[size_t(blocks) * RB * kc], &l.b[blocks * RB], b.col.data(), y + size_t(blocks) * RB * b.l_out,
-                      rest, kc, b.l_out, b.lp);
+            conv_rows(&l.w[size_t(blocks) * RB * kc], &l.b[blocks * RB], x, y + size_t(blocks) * RB * b.l_out, rest,
+                      b.l_out);
         const size_t n = size_t(l.c_out) * b.l_out;
         if (l.relu)
             for (size_t j = 0; j < n; ++j) y[j] = y[j] > 0.0f ? y[j] : 0.0f;

@@ -27,8 +27,8 @@ public:
     int n_long, n_short, n_acf, delta, history;
 
 private:
-    struct Sparse {  // one triangular filter per grid bin: (spectrum bin, weight) pairs
-        std::vector<int> start, rows;
+    struct Sparse {  // one triangular filter per grid bin: weights[start[g] .. start[g+1]) on the spectrum bins
+        std::vector<int> start, first;  // from first[g] on (a triangle covers a contiguous range of bins)
         std::vector<float> weights;
     };
     static Sparse filterbank(int n_fft, int sr, const std::vector<double>& centers_hz, double step_ratio);
@@ -38,14 +38,15 @@ private:
     std::vector<float> w_long_, w_short_, w_acf_;
     float norm_long_, norm_short_;
     Sparse fb_long_, fb_short_;
-    std::vector<int> stack_idx_;  // [n_harmonics][n_fine]
+    std::vector<int> stack_first_;  // [n_harmonics] grid bin of fine bin 0 at each harmonic (the rest follow in order)
     std::vector<int> acf_i0_;     // [acf_multiples][n_fine]
     std::vector<float> acf_w0_, acf_w1_;
     std::vector<float> coord_;
 
     RealFFT fft_long_, fft_short_, fft_acf_;
     std::vector<float> tmp_, db_long_, db_prev_, mag_short_, r_;
-    std::vector<Cpx> spec_;
+    std::vector<float> spec_re_, spec_im_;         // spectrum of the FFT in progress
+    std::vector<float> norm_l_, norm_s_, norm_d_;  // [n_grid] the three stack channels before gathering
 };
 
 }  // namespace pt

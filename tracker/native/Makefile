@@ -11,7 +11,9 @@ else ifneq ($(filter armv7l armv8l,$(ARCH)),)
 else
   CPUFLAGS ?= -mcpu=native
 endif
-CXXFLAGS ?= -O3 -std=c++17 -Wall -Wextra -fno-math-errno $(CPUFLAGS)
+# -ffp-contract=fast: a * b + c becomes one fused multiply-add (GCC's default; stated because the inner loops
+# of the network and the FFT depend on it)
+CXXFLAGS ?= -O3 -std=c++17 -Wall -Wextra -fno-math-errno -ffp-contract=fast $(CPUFLAGS)
 LDLIBS   := -ldl -lpthread
 
 SRC := src/main.cpp src/model.cpp src/frontend.cpp src/decoder.cpp

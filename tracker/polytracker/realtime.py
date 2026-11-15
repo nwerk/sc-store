@@ -23,7 +23,24 @@ SETTABLE = {
 }
 
 
-def set_realtime(priority: int, cpu: int | None):
+def jack_rt_priority(client) -> int:
+    """Realtime priority of JACK's client threads (scsynth's audio thread has the same); -1 if unknown."""
+    try:
+        import jack
+
+        return int(jack._lib.jack_client_real_time_priority(client._ptr))
+    except Exception:
+        return -1
+
+
+def set_realtime(priority: int, cpu: int | None, jack_priority: int = -1):
+    """SCHED_FIFO for the analysis, below the JACK audio threads: a late pitch frame is inaudible, a late audio
+    block is a dropout."""
+    if priority > 0 and jack_priority > 0 and priority >= jack_priority:
+        capped = max(jack_priority - 1, 1)
+        print(f"[polytracker] realtime priority {priority} lowered to {capped}: the JACK audio threads run at "
+              f"{jack_priority}", flush=True)
+        priority = capped
     if cpu is not None and hasattr(os, "sched_setaffinity"):
         try:
             os.sched_setaffinity(0, {cpu})

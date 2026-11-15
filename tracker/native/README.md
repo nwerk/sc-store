@@ -1,7 +1,7 @@
 # Native tracker (C++)
 
 A C++ port of the realtime path of `polytracker`: frontend, network, decoder, JACK input and OSC output. Same
-command line, same OSC messages, same notes as `python -m polytracker run`, at about a third of the CPU on the
+command line, same OSC messages, same notes as `python -m polytracker run`, at about a fifth of the CPU on the
 laptop. `classes/inputtracker.scd` starts it instead of the Python tracker as soon as it is built
 (`engine: \auto`; `\python` forces the Python one).
 
@@ -56,18 +56,45 @@ Same machine, same benchmark (six voices sounding), mean per frame:
 
 | machine | Python | native |
 |---|---|---|
-| laptop (i9-13900H, performance core) | 2.8 ms | 0.85 ms |
+| laptop (i9-13900H, performance core, on battery) | 2.8 ms | 0.59 ms |
 | Raspberry Pi 4 | 7.1 ms | not measured yet: run `bench` |
 
-On the laptop, the network went from 1.0 ms (numpy) to 0.56 ms, and the frontend from 1.1 ms to 0.27 ms. The
+The laptop numbers were taken on battery in its power-saving profile (the core runs at well under 1 GHz then), so
+they compare Python and native on one machine and say little about another one.
+
+On the laptop, the network went from 1.0 ms (numpy) to 0.46 ms, and the frontend from 1.1 ms to 0.11 ms. The
 decoder went from 0.6 ms to under 0.01 ms; in Python it was mostly interpreter overhead.
+
+Where the time goes now, and what was done about it:
+
+- Network (0.46 ms, 4.35 million multiply-adds per frame): the convolutions read the zero-padded input in place
+  instead of copying it into an im2col matrix first. Per layer the input (20 kB) and one block of weights (6 kB)
+  then fit the Pi 4's 32 kB L1 cache. The inner loop is within about 1.5x of what two multiply-add units can do,
+  so what is left here is the size of the model.
+- FFTs (four per frame, 0.07 ms): radix 4 on separate real and imaginary arrays, bit-reversal folded into the first
+  pass, the real-FFT pre/post-processing done for bins k and n/2 - k together. A 4096-point transform went from
+  54 to 21 microseconds.
+- Rest of the frontend (0.04 ms): the triangular filters are contiguous dot products, the harmonic stacks are
+  copied instead of gathered, the level sums use eight partial sums.
+
+A live run costs more per frame than `bench`, which runs frames back to back: between two frames the thread sleeps,
+and a CPU that scales its clock with the load slows down meanwhile (laptop: 17 % live against 12 % in `bench` at
+hop 256). On the Pi, `run-sc-main_multi.sh` therefore sets the `performance` governor.
+
+## Realtime priority
+
+The analysis thread asks for SCHED_FIFO (`--rt-priority`, default 50) so that ordinary processes cannot delay it.
+It never runs above JACK's audio threads: if the requested priority is not below the one JACK gives its clients
+(`jack_client_real_time_priority`; scsynth's audio thread has the same), it is lowered to one below it and a
+line says so. A late pitch frame is inaudible, a late audio block is a dropout. `jackd` started without `-P` runs
+at priority 10, so there the tracker ends up at 9.
 
 ## Layout
 
 | file | port of |
 |---|---|
-| `src/model.*` | `config.py`, `net.py` (register-blocked GEMM, GCC vector types: AVX on x86, NEON on ARM) |
-| `src/fft.h` | numpy's `rfft`/`irfft` (radix 2; Bluestein for the non-power-of-two windows at other sample rates) |
+| `src/model.*` | `config.py`, `net.py` (register-blocked convolution, GCC vector types: AVX on x86, NEON on ARM) |
+| `src/fft.h` | numpy's `rfft`/`irfft` (radix 4; Bluestein for the non-power-of-two windows at other sample rates) |
 | `src/frontend.*` | `frontend.py` |
 | `src/decoder.*` | `decoder.py`, `refine.py` |
 | `src/tracker.h` | `engine.py` (incl. the reuse of the short spectrum from `delta` samples back) |

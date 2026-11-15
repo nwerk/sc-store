@@ -405,7 +405,16 @@ double arg_num(const osc::Arg& a) { return a.tag == 's' ? std::stod(a.str) : a.n
 std::atomic<bool> g_stop{false};
 void on_signal(int) { g_stop = true; }
 
-void set_realtime(int priority, int cpu) {
+// The analysis thread gets SCHED_FIFO so that ordinary processes (sclang, the desktop) cannot delay it, but it
+// must stay below the JACK audio threads: a late pitch frame is inaudible, a late audio block is a dropout.
+// jack_priority: realtime priority of JACK's client threads (-1 = unknown or not realtime).
+void set_realtime(int priority, int cpu, int jack_priority) {
+    if (priority > 0 && jack_priority > 0 && priority >= jack_priority) {
+        const int capped = jack_priority > 1 ? jack_priority - 1 : 1;
+        std::printf("[polytracker] realtime priority %d lowered to %d: the JACK audio threads run at %d\n", priority,
+                    capped, jack_priority);
+        priority = capped;
+    }
     if (cpu >= 0) {
         cpu_set_t set;
         CPU_ZERO(&set);
@@ -605,7 +614,7 @@ int cmd_run(const Args& a) {
 
     JackSource src(a.str("--input", "system:capture_1"), a.str("--client-name", "polytracker"));
     lock_memory();
-    set_realtime(int(a.num("--rt-priority", 50)), int(a.num("--cpu", -1)));  // before measuring: the choice reflects the real scheduling
+    set_realtime(int(a.num("--rt-priority", 50)), int(a.num("--cpu", -1)), src.rt_priority());  // before measuring: the choice reflects the real scheduling
     PitchNet net = PitchNet::load(model_path(a));
     const DecoderParams params = decoder_params(a);
     std::unique_ptr<Tracker> tr = hop_s == "auto" ? choose_hop(net, params, src.sample_rate)

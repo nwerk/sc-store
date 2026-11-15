@@ -2,7 +2,7 @@
 //
 // A small neural network runs in an external process: the native C++ tracker (tracker/native, build it once with
 // `make -C tracker/native`) if it is built, else the Python one (tracker/polytracker, numpy only). Both give the
-// same notes; the native one needs about a third of the CPU (`tracker/native/build/polytracker bench` or
+// same notes; the native one needs about a fifth of the CPU (`tracker/native/build/polytracker bench` or
 // `python -m polytracker bench` measure this machine; `engine:` option). At startup it measures the
 // machine and picks a 5.3 ms hop, or 10.7 ms if the CPU cannot keep up comfortably (`hop:` option). It listens to
 // the guitar through its own JACK input and writes its results straight into a block of control buses on
@@ -103,7 +103,8 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 		python: nil,                         // default: tracker/.venv/bin/python, then python3
 		model: nil,                          // default: tracker/models/guitar_v1.npz
 		jackPort: nil,                       // default: system:capture_<inChan+1>
-		monoMode: \latest, controlPort: 57150, cpu: nil, rtPriority: 50,
+		monoMode: \latest, controlPort: 57150, cpu: nil,
+		rtPriority: 50,                      // SCHED_FIFO priority of the analysis; the tracker lowers it below JACK's audio threads if needed
 		hop: \auto,                          // \auto (measure at startup), 256 (5.3 ms) or 512 (10.7 ms, half the CPU)
 		decoderArgs: "",                     // extra command line, e.g. "--on 0.6 --gate-db -70"
 		verbose: false

@@ -37,7 +37,7 @@ s.waitForBoot {
 `~polyTrackerNew` options (all optional): `inChan`, `freqBus`/`ampBus`/`lagAmpBus`/`trigBus` (Bus objects, else
 allocated), `target`/`addAction`, `synthArgs` (extra `\polyTracker` args such as `[\holdLast, 1]`), `jackPort`
 (default `system:capture_<inChan+1>`), `python`, `model`, `monoMode`, `hop` (`\auto` = default, `256`, `512`),
-`cpu` (pin to a core), `rtPriority`,
+`cpu` (pin to a core), `rtPriority` (SCHED_FIFO priority, kept below JACK's audio threads),
 `decoderArgs` (extra command line, e.g. `"--hop 512 --no-refine"`), `autoLaunch`, `verbose`.
 The Python process is started and supervised by sclang (it exits by itself when sclang dies, and when
 `~tracker.run(false)` is set it idles). On Windows `autoLaunch` is off: start `python -m polytracker run`
@@ -78,7 +78,7 @@ numpy loaded and print a warning if it is the reference one.
 
 `.venv/bin/python` inside `tracker/` is picked up automatically by `inputtracker.scd`.
 
-**Native tracker:** `make -C tracker/native` builds a C++ port of the realtime tracker (same notes, about a third
+**Native tracker:** `make -C tracker/native` builds a C++ port of the realtime tracker (same notes, about a fifth
 of the CPU, no Python needed at runtime). `inputtracker.scd` uses it automatically once it is built. See
 [native/README.md](native/README.md).
 For real-time scheduling the user needs an `rtprio` limit (the pisound image already grants this to `@audio`);
@@ -180,7 +180,7 @@ behind (`dropped` in the stats).
   (excluding those that coincide with another active note), parabolic interpolation, inharmonicity
   correction, weighted-median agreement of the votes. Costs ~0.025 ms per note and is throttled to every 12 ms.
 * **Runtime** (`realtime.py`, `perf.py`): hop chosen by a startup measurement; JACK callback only copies into a ring buffer; analysis runs in its own
-  (optionally SCHED_FIFO, pinned) thread of the process; GC is frozen; stats and heartbeats go to sclang once a
+  (optionally SCHED_FIFO below JACK's audio threads, pinned) thread of the process; GC is frozen; stats and heartbeats go to sclang once a
   second; SIGTERM when the parent dies.
 
 ## Training / improving the model

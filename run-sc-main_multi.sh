@@ -13,6 +13,8 @@
 # Pi (detected by its pisound install): if a Focusrite interface (Scarlett, Clarett, ...) is connected, the
 #   pisound JACK service is replaced by jackd on the Focusrite and restored on exit; otherwise the running
 #   pisound JACK is used. Called by launchers/boot-sc.sh (sc-boot.service, pisound button).
+#   The CPU governor is set to `performance` (CPU_GOVERNOR, empty = leave it) and under-voltage / throttling
+#   reported by the firmware is printed at start and exit.
 # Any other Linux machine (laptop): a JACK server that is already running is used as it is. Otherwise jackd is
 #   started on JACK_DEVICE (default: the Focusrite if connected, else the built-in card) and stopped on exit.
 # ============================================================
@@ -42,6 +44,9 @@ fi
 : "${JACK_PERIOD:=256}"
 : "${JACK_NPERIODS:=2}"
 : "${UI_HTTP_PORT:=8080}"               # serves ui/main.tosc to the tablet; 0 = off
+if [[ "$ON_PI" -eq 1 ]]; then
+    : "${CPU_GOVERNOR=performance}"     # Pi: CPU frequency governor while the patch runs; empty = leave it alone
+fi
 export TOUCHOSC_IP                      # read by osc/oscconfig_multi.scd
 export UI_HTTP_PORT                     # read by osc/ui_version.scd (for its hints)
 # ============================================================
@@ -66,6 +71,43 @@ kill_processes() {
     else
         echo "No running instances of $process_name found."
     fi
+}
+
+# ---- CPU (Pi) ----
+# The audio load comes in short bursts (one block every few ms). A governor that scales the clock with the load
+# (ondemand, schedutil) sees a mostly idle CPU, clocks down, and each burst then takes several times longer:
+# dropouts at a low average load. Pin the clock to its maximum while the patch runs. Not undone on exit.
+set_cpu_governor() {
+    local want="$1" g changed=0 failed=0
+    [[ -z "$want" ]] && return 0
+    for g in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
+        [[ -r "$g" ]] || continue
+        [[ "$(cat "$g")" == "$want" ]] && continue
+        if echo "$want" | sudo -n tee "$g" >/dev/null 2>&1; then changed=1; else failed=1; fi
+    done
+    if [[ "$failed" -eq 1 ]]; then
+        echo "Warning: could not set the CPU governor to '$want' (now: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)). Expect dropouts under load."
+    elif [[ "$changed" -eq 1 ]]; then
+        echo "CPU governor set to '$want'."
+    fi
+}
+
+# Under-voltage or overheating make the Pi's firmware lower the clock, which sounds like an overloaded patch.
+# Bits of `vcgencmd get_throttled`: 0x1 under-voltage, 0x2 frequency capped, 0x4 throttled (now);
+# 0x10000 / 0x20000 / 0x40000 the same, at some time since boot.
+report_pi_throttling() {
+    local raw val msg=""
+    command -v vcgencmd &>/dev/null || return 0
+    raw=$(vcgencmd get_throttled 2>/dev/null) || return 0
+    val=$(( ${raw#*=} )) 2>/dev/null || return 0
+    [[ "$val" -eq 0 ]] && return 0
+    (( val & 0x1 ))     && msg+=" under-voltage NOW;"
+    (( val & 0x2 ))     && msg+=" CPU frequency capped NOW;"
+    (( val & 0x4 ))     && msg+=" CPU throttled NOW;"
+    (( val & 0x10000 )) && msg+=" under-voltage since boot;"
+    (( val & 0x20000 )) && msg+=" frequency capped since boot;"
+    (( val & 0x40000 )) && msg+=" throttled since boot;"
+    echo "Warning ($1): the Pi reports$msg check the power supply and cooling ($raw)."
 }
 
 # ---- JACK handling ----
@@ -177,6 +219,7 @@ cleanup() {
     stop_ui_server
     restore_pi_jack
     stop_desktop_jack
+    [[ "$ON_PI" -eq 1 ]] && report_pi_throttling "at exit"
     exit 1
 }
 
@@ -199,6 +242,12 @@ fi
 
 # Optional: Wait a moment to ensure processes have terminated
 sleep 1
+
+# 2.4. CPU clock (Pi)
+if [[ "$ON_PI" -eq 1 ]]; then
+    set_cpu_governor "$CPU_GOVERNOR"
+    report_pi_throttling "at start"
+fi
 
 # 2.5. JACK
 if [[ "$ON_PI" -eq 1 ]]; then
@@ -316,6 +365,9 @@ echo "SuperCollider exited (status $SCLANG_STATUS)."
 stop_ui_server
 restore_pi_jack
 stop_desktop_jack
+if [[ "$ON_PI" -eq 1 ]]; then
+    report_pi_throttling "at exit"
+fi
 
 # Pass sclang's exit status on: on the Pi, sc-boot.service (Restart=on-failure) restarts the patch after a crash
 exit "$SCLANG_STATUS"

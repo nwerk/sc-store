@@ -55,12 +55,14 @@ SynthDef(\grainSource, { |out=0, guitarIn=0, cembaloIn=0, tapeIn=0, guitar=1, ce
 
 // ---- Output safety stage (last node on the server) ----
 // Whatever happens upstream (grain overlaps adding up, a synth blowing up, NaN / inf), the hardware outputs never
-// get more than `ceiling` (≈ -0.5 dBFS): bad values become silence, DC is removed, peaks are limited
-// (5 ms look-ahead = 10 ms latency).
+// get more than `ceiling` (≈ -0.5 dBFS): bad values become silence, DC is removed, peaks are limited.
+// Everything you hear passes through here, so the limiter's delay is latency of the whole instrument: it delays by
+// twice its look-ahead (measured), 2 ms look-ahead = 4 ms. It was 5 ms = 10 ms; a longer look-ahead limits more
+// smoothly (less distortion on bass while it is limiting), a shorter one answers faster to the guitar.
 SynthDef(\outputSafety, { |ceiling=0.95|
 	var sig = Sanitize.ar(In.ar(0, 2));
 	sig = LeakDC.ar(sig);
-	sig = Limiter.ar(sig, ceiling, 0.005);
+	sig = Limiter.ar(sig, ceiling, 0.002);
 	ReplaceOut.ar(0, Sanitize.ar(sig).clip(-1, 1));
 }).add;
 
@@ -555,6 +557,8 @@ s.waitForBoot {
 	});
 
 	"Multi-synth patch booted (grain ON, tape OFF, cembalo OFF; grain input: guitar).".postln;
-	s.meter;
+	// Level meters: only where somebody can see them. On the headless Pi (Qt offscreen, see run-sc-main_multi.sh)
+	// they would cost a metering synth and 20 window updates per second in sclang for nothing.
+	if("QT_QPA_PLATFORM".getenv != "offscreen") { s.meter };
 };
 )

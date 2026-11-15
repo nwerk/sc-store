@@ -67,10 +67,11 @@ public:
 private:
     void plan();
     struct Buf {
-        int l_in, l_out, lp;      // lp: l_out rounded up to the GEMM tile width
-        std::vector<float> xpad;  // [c_in][l_in + 2 pad]
-        std::vector<float> col;   // [k * c_in][lp]
-        std::vector<float> wp;    // weights packed for the GEMM tiles
+        int l_in, l_out, lp;      // lp: l_out rounded up to the tile width
+        int row;                  // row stride of xpad: every tile may read a full vector at every tap
+        std::vector<float> xpad;  // [c_in][row] zero-padded input (stride 1), read in place by the convolution
+        std::vector<float> col;   // [k * c_in][lp] strided layers only: the input positions of every tap
+        std::vector<float> wp;    // weights packed for the tiles
         std::vector<float> out;   // [c_out][l_out]
     };
     std::vector<Buf> bufs_;

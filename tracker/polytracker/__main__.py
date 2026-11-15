@@ -12,7 +12,7 @@ from .engine import DEFAULT_MODEL, Tracker
 from .net import PitchNetNP
 from .outputs import MONO_MODES, OscOutput
 from .perf import blas_warning, choose_hop, measure, summary
-from .realtime import Runner, die_with_parent, set_realtime
+from .realtime import Runner, die_with_parent, jack_rt_priority, set_realtime
 
 
 def _hostport(s: str, default_host="127.0.0.1"):
@@ -55,7 +55,7 @@ def cmd_run(a):
     w = blas_warning()
     if w:
         print(f"[polytracker] warning: {w}", flush=True)
-    set_realtime(a.rt_priority, a.cpu)  # before measuring, so the choice reflects the real scheduling
+    set_realtime(a.rt_priority, a.cpu, jack_rt_priority(src.client))  # before measuring, so the choice reflects the real scheduling
     model = PitchNetNP.load(a.model)
     load = lambda hop: Tracker(model, params=_params(a), sample_rate=src.sample_rate, hop=hop)
     tracker = choose_hop(load, log=lambda m: print(m, flush=True)) if a.hop == "auto" else load(a.hop)
