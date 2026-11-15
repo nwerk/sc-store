@@ -7,6 +7,7 @@
 //           ~grainMaster, ~tapeMaster, ~cembaloMaster (main_multi.scd)
 //           ~synthEnabled, ~grainSrc, ~focusedSynth, ~updateChains,
 //           ~setCembaloParam, ~cembaloSpecs (main_multi.scd)
+//           ~xyTouch, ~setXYMap, ~setXYHold, ~xyMaps, ~xyMapOrder (main_multi.scd)
 //
 // Loaded INSIDE s.waitForBoot in main_multi.scd, after synth
 // instantiation so all synth handles are available.
@@ -98,6 +99,51 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~touchOSC.sendMsg('/grain/bufferLen-label', durSec.round(0.1).asString ++ " s");
 };
 
+// ---- FFT effect: what its stepped / bipolar controls are set to, in real units ----
+// The same curves as in synths/fft_prism.scd (keep them in sync).
+~fftBipolar = { |v, dead = 0.06| var d = (v - 0.5) * 2; d.sign * ((d.abs - dead).max(0) / (1 - dead)) };
+~signed = { |v, digits = 0.1| if (v > 0, "+", "") ++ v.round(digits).asString };
+~faderLabels = (
+	'/grain/fftWarp': { |v|
+		var semi = (~fftBipolar.(v) * 12).round.asInteger;
+		if (semi == 0) { "off" } { ~signed.(semi, 1) ++ " st" }
+	},
+	'/grain/fftTime': { |v| (v.squared * 1.5 + 0.045).round(0.01).asString ++ " s" },
+	'/grain/fftSource': { |v| case { v < 0.02 } { "grains" } { v > 0.98 } { "input" } { (v * 100).round.asInteger.asString ++ " % in" } },
+	'/grain/fftTilt': { |v|
+		var w = ~fftBipolar.(v, 0.04);
+		case
+		{ w < 0 } { "LP " ++ (24000 * (0.004 ** w.abs)).round(10).asInteger ++ " Hz" }
+		{ w > 0 } { "HP " ++ (24000 * ((125 ** w) - 1) * 0.002).round(10).asInteger ++ " Hz" }
+		{ "open" }
+	},
+);
+~sendFaderLabel = { |addr, val|
+	~faderLabels[addr.asSymbol] !? { |fn| ~touchOSC.sendMsg(addr.asString ++ "-label", fn.(val)) };
+};
+
+// ---- FFT pad: x = frequency shift per round (fftSpiral), y = feedback (fftFeedback) ----
+~sendFftPadLabel = { |x, y|
+	var hz = ~fftBipolar.(x) ** 3 * 600;
+	var fb = y.lincurve(0, 1, 0, 1.05, -2.5);
+	~touchOSC.sendMsg('/grain/fftPad-label',
+		"shift " ++ if (hz == 0) { "off" } { ~signed.(hz, if (hz.abs < 10, 0.01, 1)) ++ " Hz" }
+		++ "   ·   feedback " ++ if (fb >= 1) { "endless" } { (fb * 100).round.asInteger.asString ++ " %" });
+};
+~sendFftPad = { |x, y|
+	~touchOSC.sendMsg('/grain/fftPad', x.asFloat, y.asFloat);
+	~sendFftPadLabel.(x, y);
+};
+
+// ---- MultiXY page: mapping buttons, hold, the line that says what the axes do ----
+~sendXYState = {
+	~xyMapOrder.do { |name|
+		~sendToTouchOSC.("/grain/xyMap/" ++ name, (name == ~xyMap).asInteger.asFloat);
+	};
+	~sendToTouchOSC.('/grain/xyHold', ~xyHold.asInteger.asFloat);
+	~touchOSC.sendMsg('/grain/xyHint', ~xyMaps[~xyMap][\hint]);
+};
+
 // ---- Send all fader + toggle state to TouchOSC (boot sync / preset load) ----
 // faderVals (optional): busIndex -> value, used instead of reading the buses back. Right after a preset
 // has set the buses, the server has not applied them yet and getnSynchronous still returns the old values.
@@ -108,8 +154,10 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~oscMap.keysValuesDo { |addr, spec|
 		if (spec[\type] == \fader) {
 			~sendToTouchOSC.(addr, allVals.at(spec[\busIndex]));
+			~sendFaderLabel.(addr, allVals.at(spec[\busIndex]));
 		};
 	};
+	~sendFftPad.(allVals[~busNames[\fftSpiral].index], allVals[~busNames[\fftFeedback].index]);
 	~touchOSC.sendMsg('/grain/timeStretch-label', ~timeStretchLabel.(allVals[~busNames[\timeStretch].index]));
 	~sendBufferLenLabel.(~bufferDurSec);
 
@@ -119,6 +167,7 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~sendToTouchOSC.('/grain/fixedPos',    ~fixedPosState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fftFreeze',   ~fftFreezeState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/xyMode',         ~xyMode.asInteger.asFloat);
+	~sendXYState.();
 	~sendToTouchOSC.('/grain/densFromDur',    ~densFromDurState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/pitchTrackMode', ~pitchTrackMode.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/pitchMode/pos',
@@ -153,9 +202,19 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 			var val = msg[1].clip(0.0, 1.0);
 			~ccBuses.setAt(spec[\busIndex], val);
 			~sendToTouchOSC.(addr, val);
+			~sendFaderLabel.(addr, val);
 		}, addr.asString);
 	};
 };
+
+// ---- FFT pad (an XY control: x, y, touch) ----
+// Not echoed while it is touched: the pad would fight the finger. The label follows.
+OSCdef('/grain/fftPad', { |msg|
+	var x = msg[1].clip(0.0, 1.0), y = msg[2].clip(0.0, 1.0);
+	~ccBuses.setAt(~busNames[\fftSpiral].index, x);
+	~ccBuses.setAt(~busNames[\fftFeedback].index, y);
+	~sendFftPadLabel.(x, y);
+}, "/grain/fftPad");
 
 // ---- Cembalo faders: override the generic handler (the cembalo's parameters live in sclang) ----
 ~cembaloSpecs.keysDo { |key|
@@ -255,8 +314,8 @@ OSCdef('/grain/pitchTrackMode', { |msg|
 			~g.set(\fixedPos, 1);
 			~fixedPosState = true;
 			~sendToTouchOSC.('/grain/fixedPos', 1.0);
-			// Stop live mode
-			if (~liveMode) { ~stopLiveMode.() };
+			// Stop live mode (main_grain.scd only; this patch has no live mode)
+			if (~liveMode == true) { ~stopLiveMode.() };
 			~sendToTouchOSC.('/grain/liveMode', 0.0);
 			// Force Impulse trigger + no rate scatter (not CC-bus driven)
 			~g.set(\sync, 1, \rateRand, 1);
@@ -311,7 +370,7 @@ OSCdef('/grain/xyMode', { |msg|
 		if (~xyMode) {
 			~g !? { ~g.run(false) };
 		} {
-			5.do { |i| ~releaseXYVoice.(i) };
+			~releaseAllXYVoices.();
 			~g !? { ~g.run(true) };
 		};
 		("XY Mode: " ++ if(~xyMode, "ON", "OFF")).postln;
@@ -329,13 +388,19 @@ OSCdef('/grain/xyMode', { |msg|
 		var x = msg[1].clip(0.0, 1.0);
 		var y = msg[2].clip(0.0, 1.0);
 		var z = if (msg.size >= 4) { msg[3] } { 1.0 };
-		if (z <= 0) {
-			~releaseXYVoice.(idx);
-		} {
-			~spawnXYVoice.(idx, x, y);
-		};
+		~xyTouch.(idx, x, y, z);
 	}, addr);
 };
+
+// ---- MultiXY: mapping (one of the buttons is lit) and hold ----
+// Toggle buttons on the tablet; tapping the lit one keeps it lit.
+~xyMapOrder.do { |name|
+	var addr = "/grain/xyMap/" ++ name;
+	OSCdef(addr.asSymbol, { |msg|
+		if (msg[1] >= 0.5) { ~setXYMap.(name) } { ~sendXYState.() };
+	}, addr);
+};
+OSCdef('/grain/xyHold', { |msg| ~setXYHold.(msg[1] >= 0.5) }, "/grain/xyHold");
 
 // ---- Master volume: override generic fader to drive synth arg directly ----
 OSCdef('/master/volume', { |msg|
@@ -385,7 +450,7 @@ OSCdef('/grain/stopAudio', { |msg|
 	if (msg[1] >= 1.0) {
 		"Stopping all audio...".postln;
 		~speedUpdater.stop;
-		5.do { |i| ~releaseXYVoice.(i) };
+		~releaseAllXYVoices.();
 		s.freeAll;
 	};
 }, "/grain/stopAudio");
@@ -422,7 +487,7 @@ OSCdef('/record/disk', { |msg|
 			~grainMaster !? { ~grainMaster.run(true) };
 		} {
 			// Release XY voices, then pause grain chain
-			5.do { |i| ~releaseXYVoice !? { ~releaseXYVoice.(i) } };
+			~releaseAllXYVoices !? { ~releaseAllXYVoices.() };
 			~g !? { ~g.run(false) };
 			~fftFx !? { ~fftFx.run(false) };
 			~grainMaster !? { ~grainMaster.run(false) };

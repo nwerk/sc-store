@@ -39,6 +39,7 @@ sc-store/
 ├── synths/               # SynthDef definitions
 │   ├── bouncing_ball.scd # Physical-modeling bouncing ball synth
 │   ├── scramble.scd      # FFT bin scramble effect
+│   ├── fft_prism.scd     # Spectral feedback effect after the grains (main_multi.scd; core UGens only)
 │   └── tapeemulate.scd   # Tape saturation + reverb effect
 ├── run-sc-main_tape.sh   # Production launcher (tape patch)
 └── run_main_bounce-sc.sh # Production launcher (bouncing ball)

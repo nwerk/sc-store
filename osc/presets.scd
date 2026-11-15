@@ -20,7 +20,9 @@ if (File.exists(~presetDir).not) {
 ~presetStatus = "tap a slot to load";
 
 // ---- Fader bus indices (the parameters stored in presets) ----
-~presetFaderIndices = ~oscMap.select { |spec| spec[\type] == \fader }.values.collect { |spec| spec[\busIndex] }.asArray.sort;
+// (~fftPadSlots, main_multi.scd only: the FFT pad's two slots, which are not faders)
+~presetFaderIndices = (~oscMap.select { |spec| spec[\type] == \fader }.values.collect { |spec| spec[\busIndex] }.asArray
+	++ (~fftPadSlots ? [])).sort;
 
 // ---- Preset file path helper ----
 ~presetPath = { |index|
@@ -117,6 +119,8 @@ if (File.exists(~presetDir).not) {
 	data[\samplePath]       = ~samplePath;
 	// main_multi.scd: which sources feed the grain buffer (guitar / cembalo / tape)
 	~grainSrc !? { data[\grainSrc] = ~grainSrc.copy };
+	// main_multi.scd: what the XY pads do (mapping, hold)
+	~xyMap !? { data[\xyMap] = ~xyMap; data[\xyHold] = ~xyHold.asInteger };
 
 	// Write to disk (atomically, see ~writePresetFile)
 	if (~writePresetFile.(data, path)) {
@@ -187,6 +191,12 @@ if (File.exists(~presetDir).not) {
 		if (data[\grainSrc].notNil and: { ~grainSrc.notNil }) {
 			data[\grainSrc].keysValuesDo { |k, v| if (~grainSrc.includesKey(k)) { ~grainSrc[k] = v } };
 			~updateChains !? { ~updateChains.() };
+		};
+
+		// main_multi.scd: XY mapping and hold (presets saved before they existed keep the current ones)
+		if (~setXYMap.notNil) {
+			data[\xyMap] !? { |name| ~setXYMap.(name) };
+			data[\xyHold] !? { |on| ~setXYHold.(on.asBoolean) };
 		};
 
 		// Reallocate the buffer if the stored length differs (a new buffer is empty: the same length keeps

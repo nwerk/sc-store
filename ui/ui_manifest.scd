@@ -23,10 +23,22 @@
 //   /grain/density FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/duration FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/feedback FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
-//   /grain/fftFilter FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftBlur FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftFlicker FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/fftFreeze BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/fftFreezeVol FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
-//   /grain/fftMorph FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftPad XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
+//   /grain/fftPad-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftSieve FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftSmear FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftSource FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftSource-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftTilt FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftTilt-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftTime FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftTime-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftWarp FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftWarp-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /grain/filterFreq FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/fixedPos BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/freqModAmt FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -56,6 +68,12 @@
 //   /grain/xy/3 XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
 //   /grain/xy/4 XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
 //   /grain/xy/5 XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
+//   /grain/xyHint LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/xyHold BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/bow BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/classic BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/harp BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/pulse BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/xyMode BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /master/volume FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /pager1 PAGER button=- send=1 receive=1 args=VALUE:INTEGER:page:0:1
@@ -111,7 +129,7 @@
 // ============================================================
 
 ~uiContract = (
-	hash: "13e60a99",
+	hash: "7ae79617",
 	build: "2026-11-15",
 	// addresses the tablet sends (each needs an OSCdef)
 	sends: [
@@ -132,10 +150,17 @@
 		"/grain/density",
 		"/grain/duration",
 		"/grain/feedback",
-		"/grain/fftFilter",
+		"/grain/fftBlur",
+		"/grain/fftFlicker",
 		"/grain/fftFreeze",
 		"/grain/fftFreezeVol",
-		"/grain/fftMorph",
+		"/grain/fftPad",
+		"/grain/fftSieve",
+		"/grain/fftSmear",
+		"/grain/fftSource",
+		"/grain/fftTilt",
+		"/grain/fftTime",
+		"/grain/fftWarp",
 		"/grain/filterFreq",
 		"/grain/fixedPos",
 		"/grain/freqModAmt",
@@ -163,6 +188,11 @@
 		"/grain/xy/3",
 		"/grain/xy/4",
 		"/grain/xy/5",
+		"/grain/xyHold",
+		"/grain/xyMap/bow",
+		"/grain/xyMap/classic",
+		"/grain/xyMap/harp",
+		"/grain/xyMap/pulse",
 		"/grain/xyMode",
 		"/master/volume",
 		"/pager1",
@@ -217,10 +247,22 @@
 		"/grain/density",
 		"/grain/duration",
 		"/grain/feedback",
-		"/grain/fftFilter",
+		"/grain/fftBlur",
+		"/grain/fftFlicker",
 		"/grain/fftFreeze",
 		"/grain/fftFreezeVol",
-		"/grain/fftMorph",
+		"/grain/fftPad",
+		"/grain/fftPad-label",
+		"/grain/fftSieve",
+		"/grain/fftSmear",
+		"/grain/fftSource",
+		"/grain/fftSource-label",
+		"/grain/fftTilt",
+		"/grain/fftTilt-label",
+		"/grain/fftTime",
+		"/grain/fftTime-label",
+		"/grain/fftWarp",
+		"/grain/fftWarp-label",
 		"/grain/filterFreq",
 		"/grain/fixedPos",
 		"/grain/freqModAmt",
@@ -250,6 +292,12 @@
 		"/grain/xy/3",
 		"/grain/xy/4",
 		"/grain/xy/5",
+		"/grain/xyHint",
+		"/grain/xyHold",
+		"/grain/xyMap/bow",
+		"/grain/xyMap/classic",
+		"/grain/xyMap/harp",
+		"/grain/xyMap/pulse",
 		"/grain/xyMode",
 		"/master/volume",
 		"/pager1",

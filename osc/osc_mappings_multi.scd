@@ -1,7 +1,7 @@
 // ============================================================
 // OSC Address → CC Bus Index Mapping (Multi-Synth Patch)
 // ============================================================
-// Covers grain (indices 11–83), tape (remapped to 90–97) and cembalo (100–109).
+// Covers grain (indices 11–83), tape (remapped to 90–97), cembalo (100–109) and the FFT effect (110–119).
 //
 // Tape params use their ORIGINAL key names (badness, wavemix, etc.)
 // pointing to new indices 90–96. This causes the \ape SynthDef to
@@ -80,6 +80,20 @@
 	cembalo_revMix:   ( index: 107 ),
 	cembalo_room:     ( index: 108 ),
 	cembalo_pluck:    ( index: 109 ),
+
+	// ---- FFT effect \fftPrism (synths/fft_prism.scd; free zone 110–119) ----
+	// It also uses fftFreeze (83) and fftFreezeVol (66, its level). fftFilter (64) and fftMorph (65) belonged to
+	// the old \fftFreeze effect and are no longer read in this patch.
+	fftSource:   ( index: 110 ),
+	fftSpiral:   ( index: 111 ),  // pad X, 0.5 = no shift
+	fftFeedback: ( index: 112 ),  // pad Y
+	fftTime:     ( index: 113 ),
+	fftWarp:     ( index: 114 ),  // 0.5 = no transposition
+	fftSmear:    ( index: 115 ),
+	fftSieve:    ( index: 116 ),
+	fftFlicker:  ( index: 117 ),
+	fftBlur:     ( index: 118 ),
+	fftTilt:     ( index: 119 ),  // 0.5 = open
 );
 
 // ---- ~oscMap: OSC address string → (busIndex, type) ----
@@ -109,9 +123,19 @@
 	'/grain/bitDepth':     ( busIndex: 54, type: \fader, label: "Bit Depth" ),
 	'/grain/panRand':      ( busIndex: 60, type: \fader, label: "Pan Random" ),
 	'/grain/filterFreq':   ( busIndex: 61, type: \fader, label: "Filter Freq" ),
-	'/grain/fftFilter':    ( busIndex: 64, type: \fader, label: "FFT Filter" ),
-	'/grain/fftMorph':     ( busIndex: 65, type: \fader, label: "FFT Morph" ),
-	'/grain/fftFreezeVol': ( busIndex: 66, type: \fader, label: "FFT Freeze Volume" ),
+
+	// ---- FFT effect (page "fft"; synths/fft_prism.scd) ----
+	// The pad /grain/fftPad (x = fftSpiral, y = fftFeedback) is not a fader: its two slots are listed in
+	// ~fftPadSlots below and handled in oscconfig_multi.scd.
+	'/grain/fftFreezeVol': ( busIndex: 66,  type: \fader, label: "FFT Level" ),
+	'/grain/fftSource':    ( busIndex: 110, type: \fader, label: "FFT Source (grains .. grain input)" ),
+	'/grain/fftTime':      ( busIndex: 113, type: \fader, label: "FFT Loop Time" ),
+	'/grain/fftWarp':      ( busIndex: 114, type: \fader, label: "FFT Warp (transposition per round)" ),
+	'/grain/fftSmear':     ( busIndex: 115, type: \fader, label: "FFT Smear" ),
+	'/grain/fftSieve':     ( busIndex: 116, type: \fader, label: "FFT Sieve" ),
+	'/grain/fftFlicker':   ( busIndex: 117, type: \fader, label: "FFT Sieve Flicker" ),
+	'/grain/fftBlur':      ( busIndex: 118, type: \fader, label: "FFT Blur" ),
+	'/grain/fftTilt':      ( busIndex: 119, type: \fader, label: "FFT Filter (low-pass .. open .. high-pass)" ),
 
 	// ---- Master (persistent across pages) ----
 	'/master/volume':      ( busIndex: 11, type: \fader, label: "Master Volume" ),
@@ -162,6 +186,16 @@
 	'/grain/srcGuitar':    ( type: \toggle,   label: "Grain In: Guitar" ),
 	'/grain/srcCembalo':   ( type: \toggle,   label: "Grain In: Cembalo" ),
 	'/grain/srcTape':      ( type: \toggle,   label: "Grain In: Tape Synth" ),
+);
+
+// ---- FFT effect: pad slots and starting values ----
+// The pad's two slots are stored in presets like faders (osc/presets.scd adds them to ~presetFaderIndices).
+~fftPadSlots = [~busNames[\fftSpiral].index, ~busNames[\fftFeedback].index];
+// Neutral settings: the effect passes its input unchanged, silent until the level fader is raised.
+// Applied at boot, and for the slots a preset from before this effect does not contain.
+~fftDefaults = (
+	fftSource: 0, fftSpiral: 0.5, fftFeedback: 0, fftTime: 0, fftWarp: 0.5,
+	fftSmear: 0, fftSieve: 0, fftFlicker: 0.3, fftBlur: 0, fftTilt: 0.5
 );
 
 // ---- Reverse lookup: bus index → OSC address (for feedback) ----

@@ -18,18 +18,9 @@ thisProcess.interpreter.executeFile(~basePath ++ "midi/midiconfig_multi.scd");
 // that references ~busNames[...].index at compile time.
 // granular.scd uses ~busNames[\density] etc. (grain indices, unchanged)
 thisProcess.interpreter.executeFile(~basePath ++ "synths/granular.scd");
-// fft_freeze.scd uses ~busNames[\fftFreeze] etc. (grain indices, unchanged)
-// fft_freeze.scd needs PV_Freeze / PV_Morph from sc3-plugins. Without them the whole file fails to compile, \fftFreeze
-// never exists, and the grain output (it is routed through that synth) never reaches the master = silence.
-// Fall back to a dry pass-through so the patch still sounds; freeze / filter / morph do nothing until it is installed.
-if(\PV_Freeze.asClass.notNil and: { \PV_Morph.asClass.notNil }) {
-	thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_freeze.scd");
-} {
-	"sc3-plugins is not installed (PV_Freeze / PV_Morph missing): FFT freeze/morph DISABLED, grain output passes through dry. Install it with: sudo apt install sc3-plugins".warn;
-	SynthDef(\fftFreeze, { |micIn=0, granIn=0, out=0, ccBus=0, freeze=0, fftFilterAmt=0, morphAmt=0, fftVol=0|
-		Out.ar(out, In.ar(granIn, 2));
-	}).add;
-};
+// fft_prism.scd: \fftPrism, the spectral feedback effect after the grains. Core UGens only (no sc3-plugins).
+// It replaces \fftFreeze (synths/fft_freeze.scd, still used by main_grain.scd).
+thisProcess.interpreter.executeFile(~basePath ++ "synths/fft_prism.scd");
 // tapeemulate.scd uses ~busNames[\badness] etc. — now baked as 90–96
 thisProcess.interpreter.executeFile(~basePath ++ "synths/tapeemulate.scd");
 // inputtracker.scd: ~polyTrackerNew (polyphonic ML tracker) + \polyTracker SynthDef (no ~busNames refs)
@@ -40,7 +31,7 @@ thisProcess.interpreter.executeFile(~basePath ++ "classes/master.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "synths/cembalo.scd");
 
 // ---- Grain input mixer ----
-// Whatever this writes is what \rec puts into the grain buffer (and what the FFT freeze freezes).
+// Whatever this writes is what \rec puts into the grain buffer (and what the FFT effect's source fader blends in).
 // guitar / cembalo / tape are 0..1 gains (the /grain/src* toggles); any combination can be on.
 // The stereo synths are summed to mono at -3 dB.
 // The sum is limited to 0.9 (10 ms look-ahead; only the recording is delayed, nothing you hear directly):
@@ -95,10 +86,12 @@ s.waitForBoot {
 		pluck: 0  // picking position amount: off until the fader is moved (or a preset sets it)
 	);
 	~tapeDefaults.keysValuesDo { |k, v| ~ccBuses.setAt(~busNames[k].index, v) };
+	// ---- FFT effect: neutral until its faders are moved (osc_mappings_multi.scd) ----
+	~fftDefaults.keysValuesDo { |k, v| ~ccBuses.setAt(~busNames[k].index, v) };
 
 	// ---- Audio buses ----
 	~micBus      = Bus.audio(s, 1);   // mono microphone input
-	~grainSrcBus = Bus.audio(s, 1);   // selected sources (guitar / cembalo / tape) → \rec + FFT freeze
+	~grainSrcBus = Bus.audio(s, 1);   // selected sources (guitar / cembalo / tape) → \rec + FFT effect
 	~cembaloOutBus = Bus.audio(s, 2); // cembalo output → cembalo output stage + grain input mixer
 	~ptrBus      = Bus.audio(s, 1);   // record pointer
 	~fftInBus    = Bus.audio(s, 2);   // grain → FFT stage input
@@ -190,14 +183,13 @@ s.waitForBoot {
 		\ptDensOverlap,   2.0,
 	], ~granGrp);
 
-	~fftFx = Synth(\fftFreeze, [
-		\micIn,       ~grainSrcBus,
-		\granIn,      ~fftInBus,
-		\ccBus,       ~ccBuses,
-		\out,         ~grainOutBus,
-		\freeze,      0,
-		\fftFilterAmt,0,
-		\morphAmt,    0,
+	// Spectral feedback effect (synths/fft_prism.scd); all its controls are CC slots (page "fft" on the tablet).
+	// Tweak: ~fftFx.set(\loopLevel, 0.15)  level endless feedback settles at (0.15 = about -16 dB)
+	~fftFx = Synth(\fftPrism, [
+		\micIn,  ~grainSrcBus,
+		\granIn, ~fftInBus,
+		\ccBus,  ~ccBuses,
+		\out,    ~grainOutBus,
 	], ~fftGrp);
 
 	// ---- Polyphonic pitch tracker (shared; used by \apePoly and the cembalo) ----
@@ -267,6 +259,11 @@ s.waitForBoot {
 			v !? { ~setCembaloParam.(k, v) };
 		};
 		if(faders[~busNames[\tape_pluck].index].isNil) { ~ccBuses.setAt(~busNames[\tape_pluck].index, 0) };
+		// Presets from before the FFT effect: its new controls load neutral (the level fader is stored, as before)
+		~fftDefaults.keysValuesDo { |k, v|
+			var idx = ~busNames[k].index;
+			if(faders[idx].isNil) { ~ccBuses.setAt(idx, v); faders[idx] = v };
+		};
 	};
 
 	// Picking position calibration, the same for the tape synth and the cembalo (classes/pluckpos.scd).
@@ -366,10 +363,15 @@ s.waitForBoot {
 	~ptFixedPosSec    = 0.0;
 	~samplePath       = nil;
 
-	// ---- MultiXY voice state (5 touch slots) ----
-	~xyVoices      = Array.newClear(5);
-	~xyTimeouts    = Array.newClear(5);
+	// ---- MultiXY voice state (5 pads = 5 fingers, 5 voices) ----
+	// A pad is not tied to a voice: with HOLD, a voice keeps sounding after its finger has left, and the next
+	// touch starts another one (see "MultiXY" below).
+	~xyVoices      = Array.newClear(5);   // the \gran synths
+	~xyVoiceState  = Array.newClear(5);   // per voice: (rec:, x:, y:, speed:, lastTime:, born:, task:)
+	~xyPadVoice    = Array.newClear(5);   // pad index -> voice index while the pad is touched
 	~xyMaxGrainsHz = 80;
+	~xyMap         = \classic;            // which mapping the pads use (~xyMaps)
+	~xyHold        = false;
 
 	~updateXYDensCap = {
 		var count = ~xyVoices.select(_.notNil).size.max(1);
@@ -479,16 +481,97 @@ s.waitForBoot {
 		};
 	};
 
-	// ---- MultiXY voice management ----
-	~spawnXYVoice = { |idx, x, y|
-		var posSec       = x * ~bufferDurSec;
-		var dur          = y.linlin(0, 1, 0.01, 1.5);
-		var detune       = y.linlin(0, 1, 0, 30);
-		var distortion   = y.linlin(0, 1, 1.05, 0.7);
-		var pendingCount = (~xyVoices.select(_.notNil).size + 1).max(1);
-		var spawnCap     = ~xyMaxGrainsHz / pendingCount;
-		if (~xyMode) {
-			var commonArgs = [
+	// ============================================================
+	// MultiXY: what a finger on the pad does
+	// ============================================================
+	// Every touch is one \gran voice. A mapping turns the finger (x, y: 0..1, and how fast it moves) into what
+	// that voice plays. The buttons under the pad choose the mapping (/grain/xyMap/<name>):
+	//   classic  X = place in the loop      Y = longer grains, more detune, crush and scatter (the original mapping)
+	//   harp     X = place in the loop      Y = pitch, in steps of a pentatonic scale (middle = as recorded)
+	//   bow      X = scrub through the loop Y = brightness. Silent while the finger rests: moving it plays the loop
+	//            at the finger's speed and in its direction, like pulling tape past a head. With HOLD, a finger
+	//            that leaves while moving keeps its speed: flick it and the note stays
+	//   pulse    X = place in the loop      Y = pulse rate in steps (1 .. 32 per second): fingers make polyrhythms
+	// A mapping returns: pos (0..1), dur (s), detune, crush (bitDepth: 1.05 clean .. 0.05), scatter (0..1),
+	// and optionally rate, amp, pan, dens (grains / s, 0 = the density fader), cutoff (Hz), sync (1 = even, 0 = random).
+	// st is the voice's state: st[\speed] = finger speed in loop lengths per second (signed), st[\slot] = 0..4.
+	// HOLD (/grain/xyHold): a voice keeps playing when its finger leaves; the next touch adds another voice (up to
+	// 5, then the oldest is replaced). HOLD off releases all voices without a finger.
+	~xyHarpSteps  = #[-12, -10, -8, -5, -3, 0, 2, 4, 7, 9, 12];   // semitones, one per grid line of the pad
+	~xyPulseSteps = #[1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];     // pulses per second
+	~xySlotPan    = #[0, -0.6, 0.6, -0.3, 0.3];
+	~xyMaps = (
+		classic: (
+			hint: "X place in loop   ·   Y grain length + detune + crush + scatter",
+			map: { |x, y, st| (
+				pos: x, dur: y.linlin(0, 1, 0.01, 1.5), detune: y.linlin(0, 1, 0, 30),
+				crush: y.linlin(0, 1, 1.05, 0.7), scatter: y
+			) }
+		),
+		harp: (
+			hint: "X place in loop   ·   Y pitch in scale steps (middle = as recorded)",
+			map: { |x, y, st| (
+				pos: x, dur: 0.3, detune: 2, crush: 1.05, scatter: 0.03,
+				rate: ~xyHarpSteps[(y * (~xyHarpSteps.size - 1)).round.asInteger].midiratio,
+				dens: 12, pan: x.linlin(0, 1, -0.7, 0.7)
+			) }
+		),
+		bow: (
+			hint: "X scrub: move to play, speed = pitch, direction = forwards / backwards   ·   Y brightness",
+			moving: true,
+			map: { |x, y, st|
+				var speed = st[\speed] * ~bufferDurSec;   // loop seconds per second = playback speed
+				(
+					pos: x, dur: y.linlin(0, 1, 0.14, 0.04), detune: 0, crush: 1.05, scatter: 0,
+					rate: speed.abs.clip(0.05, 4) * if (speed < 0) { -1 } { 1 },
+					amp: (speed.abs / 0.4).clip(0, 1).sqrt,
+					dens: 40, cutoff: y.linexp(0, 1, 400, 18000), pan: ~xySlotPan[st[\slot]] * 0.5
+				)
+			}
+		),
+		pulse: (
+			hint: "X place in loop   ·   Y pulse rate in steps (1 .. 32 per second)",
+			map: { |x, y, st|
+				var hz = ~xyPulseSteps[(y * (~xyPulseSteps.size - 1)).round.asInteger];
+				(
+					pos: x, dur: (0.6 / hz).clip(0.02, 0.25), detune: 0, crush: 1.05, scatter: 0,
+					dens: hz, sync: 1, pan: ~xySlotPan[st[\slot]]
+				)
+			}
+		),
+	);
+	~xyMapOrder = [\classic, \harp, \bow, \pulse];
+
+	// Mapping result -> \gran arguments (the ones that follow the finger)
+	~xyVoiceArgs = { |m, st|
+		[
+			\fixedPosSec,    m[\pos] * ~bufferDurSec,
+			\baseDur,        m[\dur],
+			\randDetune,     m[\detune],
+			\bitDepth,       m[\crush],
+			// while recording the voice follows the write head (scatter in time), otherwise it sits on its place
+			\ptrRandSamples, if (st[\rec]) { m[\scatter] * 1.5 * s.sampleRate } { 0 },
+			\fixedPosRand,   if (st[\rec]) { 0 } { m[\scatter] * 0.2 },
+			\xyRate,         m[\rate] ? 1,
+			\xyAmp,          m[\amp] ? 1,
+			\xyPan,          m[\pan] ? 0,
+			\xyDens,         m[\dens] ? 0,
+			\xyCutoff,       m[\cutoff] ? 20000,
+			\sync,           m[\sync] ? 1,
+		]
+	};
+
+	// Start or move the voice `slot`
+	~playXYVoice = { |slot, x, y|
+		var map = ~xyMaps[~xyMap];
+		var st  = ~xyVoiceState[slot];
+		var now = Main.elapsedTime;
+		var dt, pendingCount;
+		if (~xyVoices[slot].isNil) {
+			st = (slot: slot, rec: ~recState, x: x, y: y, speed: 0.0, lastTime: now, born: now);
+			~xyVoiceState[slot] = st;
+			pendingCount = (~xyVoices.select(_.notNil).size + 1).max(1);
+			~xyVoices[slot] = Synth(\gran, [
 				\ccBus,       ~ccBuses,
 				\amp,         1.0,
 				\buf,         b,
@@ -496,61 +579,87 @@ s.waitForBoot {
 				\atk,         0.01,
 				\rel,         0.15,
 				\gate,        1,
-				\sync,        1,
 				\xyMode,      1,
-				\fixedPosSec, posSec,
 				\minPtrDelay, 0,
-				\baseDur,     dur,
-				\randDetune,  detune,
-				\bitDepth,    distortion,
-				\maxDensHz,   spawnCap,
-			];
-			if (~xyVoices[idx].isNil) {
-				~xyVoices[idx] = if (~recState) {
-					Synth(\gran, commonArgs ++ [
-						\fixedPos,       0,
-						\fixedPosRand,   0,
-						\ptrRandSamples, y * 1.5 * s.sampleRate,
-						\safeMargin,     0.02,
-					], ~granGrp)
-				} {
-					Synth(\gran, commonArgs ++ [
-						\fixedPos,       1,
-						\fixedPosRand,   y * 0.2,
-						\ptrRandSamples, 0,
-						\safeMargin,     0.0,
-					], ~granGrp)
-				};
-			} {
-				if (~recState) {
-					~xyVoices[idx].set(
-						\fixedPosSec,    posSec,
-						\baseDur,        dur,
-						\randDetune,     detune,
-						\bitDepth,       distortion,
-						\ptrRandSamples, y * 1.5 * s.sampleRate,
-					);
-				} {
-					~xyVoices[idx].set(
-						\fixedPosSec,  posSec,
-						\baseDur,      dur,
-						\randDetune,   detune,
-						\bitDepth,     distortion,
-						\fixedPosRand, y * 0.2,
-					);
-				};
+				\maxDensHz,   ~xyMaxGrainsHz / pendingCount,
+				\fixedPos,    if (st[\rec]) { 0 } { 1 },
+				\safeMargin,  if (st[\rec]) { 0.02 } { 0.0 },
+			] ++ ~xyVoiceArgs.(map[\map].(x, y, st), st), ~granGrp);
+			// mappings that react to movement: let the speed die away once the finger rests (no messages then).
+			// A held voice (finger gone) keeps the speed it was left with.
+			if (map[\moving] == true) {
+				st[\task] = Routine({
+					loop {
+						0.03.wait;
+						if ((Main.elapsedTime - st[\lastTime] > 0.05) and: { ~xyPadVoice.includes(slot) }) {
+							st[\speed] = st[\speed] * 0.6;
+							~xyVoices[slot] !? { |v| v.set(*~xyVoiceArgs.(map[\map].(st[\x], st[\y], st), st)) };
+						};
+					};
+				}).play(AppClock);
 			};
+			~updateXYDensCap.();
+		} {
+			// finger speed in loop lengths per second, smoothed (the tablet sends up to ~60 positions per second)
+			dt = (now - st[\lastTime]).max(0.004);
+			st[\speed] = (st[\speed] * 0.6) + ((x - st[\x]) / dt * 0.4);
+			st[\x] = x; st[\y] = y; st[\lastTime] = now;
+			~xyVoices[slot].set(*~xyVoiceArgs.(map[\map].(x, y, st), st));
+		};
+	};
+
+	~releaseXYVoice = { |slot|
+		~xyVoiceState[slot] !? { |st| st[\task] !? { st[\task].stop } };
+		~xyVoiceState[slot] = nil;
+		~xyPadVoice.do { |v, pad| if (v == slot) { ~xyPadVoice[pad] = nil } };
+		if (~xyVoices[slot].notNil) {
+			~xyVoices[slot].set(\gate, 0);
+			~xyVoices[slot] = nil;
 			~updateXYDensCap.();
 		};
 	};
 
-	~releaseXYVoice = { |idx|
-		~xyTimeouts[idx] !? { ~xyTimeouts[idx].stop; ~xyTimeouts[idx] = nil };
-		if (~xyVoices[idx].notNil) {
-			~xyVoices[idx].set(\gate, 0);
-			~xyVoices[idx] = nil;
-			~updateXYDensCap.();
+	// A pad reports a finger: z > 0 down / moving, z <= 0 lifted
+	~xyTouch = { |pad, x, y, z|
+		var slot = ~xyPadVoice[pad];
+		if (z <= 0) {
+			if (slot.notNil) {
+				~xyPadVoice[pad] = nil;
+				if (~xyHold.not) { ~releaseXYVoice.(slot) };
+			};
+		} {
+			if (~xyMode) {
+				if (slot.isNil) {
+					// new touch: a free voice, else (HOLD) the oldest voice no finger is on
+					slot = (0..4).detect { |i| ~xyVoices[i].isNil };
+					slot = slot ?? {
+						var held = (0..4).reject { |i| ~xyPadVoice.includes(i) };
+						held = held.sort { |i, j| ~xyVoiceState[i][\born] < ~xyVoiceState[j][\born] };
+						held.first !? { |i| ~releaseXYVoice.(i); i }
+					};
+					~xyPadVoice[pad] = slot;
+				};
+				slot !? { ~playXYVoice.(slot, x, y) };
+			};
 		};
+	};
+
+	~releaseAllXYVoices = { 5.do { |i| ~releaseXYVoice.(i) } };
+
+	~setXYMap = { |name|
+		if (~xyMaps.includesKey(name)) {
+			if (name != ~xyMap) { ~releaseAllXYVoices.() };  // the voices were set up for the other mapping
+			~xyMap = name;
+			~sendXYState !? { ~sendXYState.() };
+			("XY mapping: " ++ name).postln;
+		};
+	};
+
+	~setXYHold = { |on|
+		~xyHold = on;
+		if (on.not) { 5.do { |i| if (~xyPadVoice.includes(i).not) { ~releaseXYVoice.(i) } } };
+		~sendXYState !? { ~sendXYState.() };
+		("XY hold: " ++ if (on, "ON", "OFF")).postln;
 	};
 
 	// ---- OSC control layer ----
