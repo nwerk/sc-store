@@ -25,7 +25,8 @@ sc-store/
 ├── main_tape.scd         # Tape emulation effect patch
 ├── classes/              # Shared SuperCollider classes
 │   ├── inputtracker.scd  # Polyphonic ML pitch tracker bridge (~polyTrackerNew) + onset/amp SynthDef
-│   └── master.scd        # Master output volume control
+│   ├── master.scd        # Master output volume control
+│   └── pluckpos.scd      # Picking position (bridge / neck) from the guitar's brightness, for cembalo + tape synth
 ├── tracker/              # Polyphonic guitar pitch tracker (Python, see tracker/README.md)
 ├── ui/                   # TouchOSC layout (main.tosc) + its version stamp / manifest (see ui/README.md)
 ├── config/

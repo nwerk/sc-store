@@ -1,7 +1,7 @@
 // ============================================================
 // OSC Address → CC Bus Index Mapping (Multi-Synth Patch)
 // ============================================================
-// Covers grain (indices 11–83), tape (remapped to 90–96) and cembalo (100–108).
+// Covers grain (indices 11–83), tape (remapped to 90–97) and cembalo (100–109).
 //
 // Tape params use their ORIGINAL key names (badness, wavemix, etc.)
 // pointing to new indices 90–96. This causes the \ape SynthDef to
@@ -54,6 +54,7 @@
 	reverb_mix:  ( index: 94 ),
 	reverb_room: ( index: 95 ),
 	master:      ( index: 96 ),
+	pluck:       ( index: 97 ),  // \apePoly: how much the picking position shapes each note (0 = off)
 
 	// ---- tape_* aliases (same indices — used by midiconfig_multi.scd) ----
 	tape_badness:     ( index: 90 ),
@@ -63,8 +64,9 @@
 	tape_reverb_mix:  ( index: 94 ),
 	tape_reverb_room: ( index: 95 ),
 	tape_master:      ( index: 96 ),
+	tape_pluck:       ( index: 97 ),
 
-	// ---- Cembalo params (free zone 100–108) ----
+	// ---- Cembalo params (free zone 100–109) ----
 	// The cembalo's parameters live in sclang (they are read per note), not in a SynthDef, so these slots
 	// only store the normalised fader values for presets and boot sync. ~setCembaloParam (main_multi.scd)
 	// maps them to the real ranges.
@@ -77,12 +79,13 @@
 	cembalo_decay:    ( index: 106 ),
 	cembalo_revMix:   ( index: 107 ),
 	cembalo_room:     ( index: 108 ),
+	cembalo_pluck:    ( index: 109 ),
 );
 
 // ---- ~oscMap: OSC address string → (busIndex, type) ----
 // type: \fader (continuous 0–1), \toggle, \momentary, \preset
 // All grain entries are copied verbatim from osc_mappings.scd.
-// New /tape/* fader entries map to the remapped indices 90–96.
+// New /tape/* fader entries map to the remapped indices 90–97.
 
 ~oscMap = (
 	// ---- Grain faders (Page 2: Grain Core) ----
@@ -133,7 +136,7 @@
 	'/preset/save':        ( type: \preset,   label: "Save Preset" ),
 	'/preset/delete':      ( type: \preset,   label: "Delete Preset" ),
 
-	// ---- Tape faders (remapped to free zone 90–96) ----
+	// ---- Tape faders (remapped to free zone 90–97) ----
 	'/tape/badness':       ( busIndex: 90, type: \fader, label: "Tape Badness" ),
 	'/tape/wavemix':       ( busIndex: 91, type: \fader, label: "Tape Wavemix" ),
 	'/tape/wavemap':       ( busIndex: 92, type: \fader, label: "Tape Wavemap" ),
@@ -141,8 +144,9 @@
 	'/tape/reverbMix':     ( busIndex: 94, type: \fader, label: "Tape Reverb Mix" ),
 	'/tape/reverbRoom':    ( busIndex: 95, type: \fader, label: "Tape Reverb Room" ),
 	'/tape/volume':        ( busIndex: 96, type: \fader, label: "Tape Volume" ),
+	'/tape/pluck':         ( busIndex: 97, type: \fader, label: "Tape Picking Position Amount" ),
 
-	// ---- Cembalo faders (free zone 100–108; handled by ~setCembaloParam, see oscconfig_multi.scd) ----
+	// ---- Cembalo faders (free zone 100–109; handled by ~setCembaloParam, see oscconfig_multi.scd) ----
 	'/cembalo/volume':     ( busIndex: 100, type: \fader, label: "Cembalo Volume" ),
 	'/cembalo/bright':     ( busIndex: 101, type: \fader, label: "Cembalo Bright" ),
 	'/cembalo/noise':      ( busIndex: 102, type: \fader, label: "Cembalo Noise" ),
@@ -152,6 +156,7 @@
 	'/cembalo/decay':      ( busIndex: 106, type: \fader, label: "Cembalo Decay" ),
 	'/cembalo/revMix':     ( busIndex: 107, type: \fader, label: "Cembalo Reverb Mix" ),
 	'/cembalo/room':       ( busIndex: 108, type: \fader, label: "Cembalo Reverb Room" ),
+	'/cembalo/pluck':      ( busIndex: 109, type: \fader, label: "Cembalo Picking Position Amount" ),
 
 	// ---- Grain input sources (toggles, any combination) ----
 	'/grain/srcGuitar':    ( type: \toggle,   label: "Grain In: Guitar" ),

@@ -85,13 +85,14 @@ s.waitForBoot {
 	~ccBuses = Bus.control(s, 128);
 	~ccBuses.setn(Array.fill(128, 0.0));
 
-	// ---- Tape synth starting sound (CC 90–96), so it plays without the tablet (footswitch) ----
+	// ---- Tape synth starting sound (CC 90–97), so it plays without the tablet (footswitch) ----
 	// A soft, slightly wobbly sine/saw pad under the cembalo. master 0.1 puts its level (RMS) about level with the
 	// cembalo's (measured with a strummed test signal; at 0.35 the tape was 14 dB louder and covered the plucks).
 	// A preset that contains tape values replaces these.
 	~tapeDefaults = (
 		badness: 0.12, wavemix: 0.35, wavemap: 0.15, badnessmap: 0.1,
-		reverb_mix: 0.35, reverb_room: 0.75, master: 0.1
+		reverb_mix: 0.35, reverb_room: 0.75, master: 0.1,
+		pluck: 0  // picking position amount: off until the fader is moved (or a preset sets it)
 	);
 	~tapeDefaults.keysValuesDo { |k, v| ~ccBuses.setAt(~busNames[k].index, v) };
 
@@ -208,32 +209,35 @@ s.waitForBoot {
 
 	// ---- Tape chain ----
 	// \apePoly = \ape with one oscillator per tracked note (up to 6), so chords are played as chords.
-	// It reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time), like \ape.
+	// It reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time), like \ape, and the pluck amount
+	// (picking position, classes/pluckpos.scd) from slot 97.
 	// Tweak: ~ape.set(\voiceBalance, 0)  all notes equally loud (1 = follow the guitar's note levels)
 	//        ~ape.set(\rel, 0.5)          longer note release (s);  \atk attack (s);  \freqLag pitch smoothing (s)
 	~ape = Synth(\apePoly, [
 		\ccBus,   ~ccBuses,
 		\polyBus, ~tartini[\block].index,
 		\vol,     ~ampBus.index,
+		\in,      ~micBus,            // guitar: picking position (the /tape/pluck fader)
 		\out,     ~tapeOutBus,
 	], ~tapeGrp);
 
 	// ---- Cembalo chain ----
 	// Plucked by the tracker's note-ons; its velocity follows the guitar input (~micBus).
 	// Its output goes to ~cembaloOutBus: heard via ~cembaloMaster, fed to the grains via ~grainSrcMix.
-	// Parameters come from the /cembalo/* faders (normalised 0..1, stored in CC slots 100–108).
+	// Parameters come from the /cembalo/* faders (normalised 0..1, stored in CC slots 100–109).
 	~cembaloSpecs = (
 		volume: ControlSpec(0, 1),           bright: ControlSpec(0, 1),
 		noise:  ControlSpec(0, 1),           warmth: ControlSpec(0, 1),
 		weird:  ControlSpec(0, 1),           octave: ControlSpec(0, 1),
 		decay:  ControlSpec(0.5, 10, \exp),  // ring time of a 220 Hz note (s)
 		revMix: ControlSpec(0, 1),           room:   ControlSpec(0, 1),
+		pluck:  ControlSpec(0, 1),           // how much the picking position shapes each note (0 = off)
 	);
 	// defaults in real units
 	// (blended with ~tapeDefaults: the cembalo plays the attacks, the tape synth the sustained bed)
 	~cembaloDefaults = (volume: 1.0, bright: 0.2, noise: 0.55, warmth: 0.8, weird: 0.35, octave: 0.3,
-		decay: 3.5, revMix: 0.25, room: 0.8);
-	~cembaloNorm = ();  // current normalised fader values (language-side mirror of CC 100–108)
+		decay: 3.5, revMix: 0.25, room: 0.8, pluck: 0);
+	~cembaloNorm = ();  // current normalised fader values (language-side mirror of CC 100–109)
 
 	~cembalo = ~cembaloNew.(s, ~tartini, (
 		inBus: ~micBus, out: ~cembaloOutBus, target: ~cembaloGrp, maxVoices: 12
@@ -255,10 +259,23 @@ s.waitForBoot {
 	~cembaloDefaults.keysValuesDo { |k, v| ~setCembaloParam.(k, ~cembaloSpecs[k].unmap(v)) };
 
 	// Preset load hook (osc/presets.scd): apply the stored cembalo faders to the cembalo.
+	// Presets from before the pluck faders existed have no value for them: they load with pluck off, as saved.
 	~onPresetFaders = { |faders|
 		~cembaloSpecs.keysDo { |k|
 			var v = faders[~busNames[("cembalo_" ++ k).asSymbol].index];
+			if(v.isNil and: { k == \pluck }) { v = 0 };
 			v !? { ~setCembaloParam.(k, v) };
+		};
+		if(faders[~busNames[\tape_pluck].index].isNil) { ~ccBuses.setAt(~busNames[\tape_pluck].index, 0) };
+	};
+
+	// Picking position calibration, the same for the tape synth and the cembalo (classes/pluckpos.scd).
+	// Switch the cembalo on, ~cembalo.monitor(true), pick single notes in the usual place: ref = the typical
+	// "as a 220 Hz note" value. Then pick at the bridge and at the neck: span = octaves between those and ref.
+	//   ~setPluckCal.(ref: 1200);   ~setPluckCal.(span: 0.5);
+	~setPluckCal = { |ref, span, track|
+		[[\pluckRef, ref], [\pluckSpan, span], [\pluckTrack, track]].do { |kv|
+			kv[1] !? { ~cembalo.set(kv[0], kv[1]); ~ape.set(kv[0], kv[1]) };
 		};
 	};
 

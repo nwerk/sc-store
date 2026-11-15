@@ -9,6 +9,7 @@
 //   /cembalo/decay FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/noise FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/octave FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /cembalo/pluck FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/revMix FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/room FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/volume FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -100,6 +101,7 @@
 //   /synth/tape/enable BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/badness FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/badnessmap FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /tape/pluck FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/reverbMix FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/reverbRoom FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/volume FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -109,14 +111,15 @@
 // ============================================================
 
 ~uiContract = (
-	hash: "0717a073",
-	build: "2026-11-14",
+	hash: "13e60a99",
+	build: "2026-11-15",
 	// addresses the tablet sends (each needs an OSCdef)
 	sends: [
 		"/cembalo/bright",
 		"/cembalo/decay",
 		"/cembalo/noise",
 		"/cembalo/octave",
+		"/cembalo/pluck",
 		"/cembalo/revMix",
 		"/cembalo/room",
 		"/cembalo/volume",
@@ -187,6 +190,7 @@
 		"/synth/tape/enable",
 		"/tape/badness",
 		"/tape/badnessmap",
+		"/tape/pluck",
 		"/tape/reverbMix",
 		"/tape/reverbRoom",
 		"/tape/volume",
@@ -199,6 +203,7 @@
 		"/cembalo/decay",
 		"/cembalo/noise",
 		"/cembalo/octave",
+		"/cembalo/pluck",
 		"/cembalo/revMix",
 		"/cembalo/room",
 		"/cembalo/volume",
@@ -290,6 +295,7 @@
 		"/synth/tape/enable",
 		"/tape/badness",
 		"/tape/badnessmap",
+		"/tape/pluck",
 		"/tape/reverbMix",
 		"/tape/reverbRoom",
 		"/tape/volume",
