@@ -1,7 +1,7 @@
 // ============================================================
 // OSC Address → CC Bus Index Mapping (Multi-Synth Patch)
 // ============================================================
-// Covers grain (indices 11–83), tape (remapped to 90–97) and cembalo (100–109).
+// Covers grain (indices 11–83), tape (remapped to 90–97), cembalo (100–109) and the pad (110–119).
 //
 // Tape params use their ORIGINAL key names (badness, wavemix, etc.)
 // pointing to new indices 90–96. This causes the \ape SynthDef to
@@ -80,6 +80,19 @@
 	cembalo_revMix:   ( index: 107 ),
 	cembalo_room:     ( index: 108 ),
 	cembalo_pluck:    ( index: 109 ),
+
+	// ---- Pad params (free zone 110–119) ----
+	// \pad (synths/pad.scd) reads these slots directly; the indices are baked in at compile time.
+	pad_volume:       ( index: 110 ),
+	pad_wobble:       ( index: 111 ),  // depth of the pitch modulation (wow, flutter, scoop)
+	pad_wobbleRate:   ( index: 112 ),
+	pad_detune:       ( index: 113 ),
+	pad_tone:         ( index: 114 ),
+	pad_wave:         ( index: 115 ),
+	pad_age:          ( index: 116 ),
+	pad_attack:       ( index: 117 ),
+	pad_release:      ( index: 118 ),
+	pad_reverb:       ( index: 119 ),
 );
 
 // ---- ~oscMap: OSC address string → (busIndex, type) ----
@@ -158,10 +171,23 @@
 	'/cembalo/room':       ( busIndex: 108, type: \fader, label: "Cembalo Reverb Room" ),
 	'/cembalo/pluck':      ( busIndex: 109, type: \fader, label: "Cembalo Picking Position Amount" ),
 
+	// ---- Pad faders (free zone 110–119; \pad reads the slots, generic fader handler) ----
+	'/pad/volume':         ( busIndex: 110, type: \fader, label: "Pad Volume" ),
+	'/pad/wobble':         ( busIndex: 111, type: \fader, label: "Pad Pitch Wobble Depth" ),
+	'/pad/wobbleRate':     ( busIndex: 112, type: \fader, label: "Pad Pitch Wobble Rate" ),
+	'/pad/detune':         ( busIndex: 113, type: \fader, label: "Pad Detune" ),
+	'/pad/tone':           ( busIndex: 114, type: \fader, label: "Pad Tone (lowpass)" ),
+	'/pad/wave':           ( busIndex: 115, type: \fader, label: "Pad Wave (saws .. pulse)" ),
+	'/pad/age':            ( busIndex: 116, type: \fader, label: "Pad Tape Age" ),
+	'/pad/attack':         ( busIndex: 117, type: \fader, label: "Pad Attack" ),
+	'/pad/release':        ( busIndex: 118, type: \fader, label: "Pad Release" ),
+	'/pad/reverb':         ( busIndex: 119, type: \fader, label: "Pad Reverb Mix" ),
+
 	// ---- Grain input sources (toggles, any combination) ----
 	'/grain/srcGuitar':    ( type: \toggle,   label: "Grain In: Guitar" ),
 	'/grain/srcCembalo':   ( type: \toggle,   label: "Grain In: Cembalo" ),
 	'/grain/srcTape':      ( type: \toggle,   label: "Grain In: Tape Synth" ),
+	'/grain/srcPad':       ( type: \toggle,   label: "Grain In: Pad" ),
 );
 
 // ---- Reverse lookup: bus index → OSC address (for feedback) ----

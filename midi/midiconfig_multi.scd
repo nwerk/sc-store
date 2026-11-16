@@ -9,6 +9,7 @@
 //       grain focused → ~setMasterVol (CC 11 + TouchOSC)
 //       tape focused  → CC 96 bus slot + /tape/volume
 //       cembalo focused → cembalo volume (~setCembaloParam, CC 100 + /cembalo/volume)
+//       pad focused   → CC 110 bus slot + /pad/volume
 //   - Footswitches CC 80/81/82: granular on/off, next preset, tape + cembalo on/off
 //     (see ~footswitchActions below).
 //
@@ -72,6 +73,7 @@ MIDIdef.cc(
 // Grain focused: updates CC 11 bus + sends /master/volume via ~setMasterVol.
 // Tape focused:  updates CC 96 bus + sends /tape/volume.
 // Cembalo focused: cembalo volume via ~setCembaloParam (also sends /cembalo/volume).
+// Pad focused: updates CC 110 bus + sends /pad/volume.
 ~lastExpPedalRaw  = nil;
 ~expPedalDeadband = 2;
 ~expPedalSmoothed = 1.0;
@@ -88,6 +90,10 @@ MIDIdef.cc(\expressionPedalMasterVol,
 			}
 			{ ~focusedSynth == \cembalo } {
 				~setCembaloParam !? { ~setCembaloParam.(\volume, ~expPedalSmoothed) };
+			}
+			{ ~focusedSynth == \pad } {
+				~ccBuses !? { ~ccBuses.setAt(~busNames[\pad_volume].index, ~expPedalSmoothed) };
+				~sendToTouchOSC !? { ~sendToTouchOSC.('/pad/volume', ~expPedalSmoothed) };
 			} {
 				// Tape: write to CC 96 bus slot; \ape reads master_vol from there
 				~ccBuses !? { ~ccBuses.setAt(~busNames[\tape_master].index, ~expPedalSmoothed) };
@@ -105,6 +111,7 @@ MIDIdef.cc(\expressionPedalMasterVol,
 //   middle : next stored preset (steps through the occupied slots, wraps around)
 //   right  : tape synth + cembalo on / off together (if either is on, both go off)
 // The expression pedal keeps its current target (the footswitch does not change ~focusedSynth).
+// The pad has no footswitch: it is switched on the tablet.
 ~footswitchCC = (left: 80, middle: 81, right: 82);
 ~footswitchActions = (
 	left: {

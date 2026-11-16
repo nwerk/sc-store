@@ -38,17 +38,20 @@ thisProcess.interpreter.executeFile(~basePath ++ "classes/inputtracker.scd");
 thisProcess.interpreter.executeFile(~basePath ++ "classes/master.scd");
 // cembalo.scd: \cembalo voices + ~cembaloNew (plucked by the tracker's note-ons; no ~busNames refs)
 thisProcess.interpreter.executeFile(~basePath ++ "synths/cembalo.scd");
+// pad.scd: \pad, the wobbly tape pad; uses ~busNames[\pad_volume] etc. (110–119)
+thisProcess.interpreter.executeFile(~basePath ++ "synths/pad.scd");
 
 // ---- Grain input mixer ----
 // Whatever this writes is what \rec puts into the grain buffer (and what the FFT freeze freezes).
-// guitar / cembalo / tape are 0..1 gains (the /grain/src* toggles); any combination can be on.
+// guitar / cembalo / tape / pad are 0..1 gains (the /grain/src* toggles); any combination can be on.
 // The stereo synths are summed to mono at -3 dB.
 // The sum is limited to 0.9 (10 ms look-ahead; only the recording is delayed, nothing you hear directly):
 // \rec hard-clips at ±1, and the tape synth alone peaks around 1.4.
-SynthDef(\grainSource, { |out=0, guitarIn=0, cembaloIn=0, tapeIn=0, guitar=1, cembalo=0, tape=0|
+SynthDef(\grainSource, { |out=0, guitarIn=0, cembaloIn=0, tapeIn=0, padIn=0, guitar=1, cembalo=0, tape=0, pad=0|
 	var sig = (In.ar(guitarIn, 1) * guitar.lag(0.05))
 		+ (In.ar(cembaloIn, 2).sum * 0.7071 * cembalo.lag(0.05))
-		+ (In.ar(tapeIn, 2).sum * 0.7071 * tape.lag(0.05));
+		+ (In.ar(tapeIn, 2).sum * 0.7071 * tape.lag(0.05))
+		+ (In.ar(padIn, 2).sum * 0.7071 * pad.lag(0.05));
 	sig = Limiter.ar(Sanitize.ar(sig), 0.9, 0.005);
 	Out.ar(out, sig);
 }).add;
@@ -66,9 +69,9 @@ SynthDef(\outputSafety, { |ceiling=0.95|
 	ReplaceOut.ar(0, Sanitize.ar(sig).clip(-1, 1));
 }).add;
 
-// ---- Tape / cembalo output stage SynthDef (inline — cannot use \master, which hardcodes CC 11) ----
+// ---- Tape / cembalo / pad output stage SynthDef (inline — cannot use \master, which hardcodes CC 11) ----
 // \ape already applies its own master_vol from CC 96 internally, the cembalo its own volume.
-// \tapeOutput is purely a mute/enable gate controlled via ~tapeMaster / ~cembaloMaster .set(\amp, ...).
+// \tapeOutput is purely a mute/enable gate controlled via ~tapeMaster / ~cembaloMaster / ~padMaster .set(\amp, ...).
 SynthDef(\tapeOutput, { |out=0, inBus=0, amp=0.0|
 	var sig = In.ar(inBus, 2);
 	sig = sig * amp.lag(0.1);
@@ -77,8 +80,8 @@ SynthDef(\tapeOutput, { |out=0, inBus=0, amp=0.0|
 
 s.waitForBoot {
 	// ---- System state ----
-	~synthEnabled = ( grain: true, tape: false, cembalo: false );  // audible on the outputs
-	~grainSrc     = ( guitar: true, cembalo: false, tape: false );  // fed into the grain buffer
+	~synthEnabled = ( grain: true, tape: false, cembalo: false, pad: false );  // audible on the outputs
+	~grainSrc     = ( guitar: true, cembalo: false, tape: false, pad: false );  // fed into the grain buffer
 	~focusedSynth = \grain;
 
 	// ---- CC slots: FIRST control buses after the boot (see midi/midiconfig_multi.scd) ----
@@ -96,25 +99,36 @@ s.waitForBoot {
 	);
 	~tapeDefaults.keysValuesDo { |k, v| ~ccBuses.setAt(~busNames[k].index, v) };
 
+	// ---- Pad starting sound (CC 110–119, normalised fader values; see synths/pad.scd) ----
+	// A dark, slowly blooming pad with a clearly audible tape wow. Presets saved before the pad existed have no
+	// values for it and leave these as they are.
+	~padDefaults = (
+		volume: 0.7, wobble: 0.55, wobbleRate: 0.35, detune: 0.5, tone: 0.42, wave: 0.25,
+		age: 0.45, attack: 0.6, release: 0.65, reverb: 0.4
+	);
+	~padDefaults.keysValuesDo { |k, v| ~ccBuses.setAt(~busNames[("pad_" ++ k).asSymbol].index, v) };
+
 	// ---- Audio buses ----
 	~micBus      = Bus.audio(s, 1);   // mono microphone input
-	~grainSrcBus = Bus.audio(s, 1);   // selected sources (guitar / cembalo / tape) → \rec + FFT freeze
+	~grainSrcBus = Bus.audio(s, 1);   // selected sources (guitar / cembalo / tape / pad) → \rec + FFT freeze
 	~cembaloOutBus = Bus.audio(s, 2); // cembalo output → cembalo output stage + grain input mixer
 	~ptrBus      = Bus.audio(s, 1);   // record pointer
 	~fftInBus    = Bus.audio(s, 2);   // grain → FFT stage input
 	~grainOutBus = Bus.audio(s, 2);   // FFT stage output → grain master
 	~tapeOutBus  = Bus.audio(s, 2);   // \ape output → tape output stage
+	~padOutBus   = Bus.audio(s, 2);   // pad output → its output stage + grain input mixer
 	~freqBus     = Bus.control(s, 1); // tracker mono pitch output
 	~ampBus      = Bus.control(s, 1); // tracker amplitude output
 	s.sync;
 
 	// ---- Groups (ordered for signal flow) ----
-	// The tape synth and the cembalo run before the recorder, so they can be fed into the grain buffer.
+	// The tape synth, the cembalo and the pad run before the recorder, so they can be fed into the grain buffer.
 	~micGrp     = Group.new;
 	~tartiniGrp = Group.after(~micGrp);
 	~tapeGrp    = Group.after(~tartiniGrp);
 	~cembaloGrp = Group.after(~tapeGrp);
-	~srcGrp     = Group.after(~cembaloGrp);
+	~padGrp     = Group.after(~cembaloGrp);
+	~srcGrp     = Group.after(~padGrp);
 	~ptrGrp     = Group.after(~srcGrp);
 	~recGrp     = Group.after(~ptrGrp);
 	~granGrp    = Group.after(~recGrp);
@@ -135,9 +149,11 @@ s.waitForBoot {
 		\guitarIn,  ~micBus,
 		\cembaloIn, ~cembaloOutBus,
 		\tapeIn,    ~tapeOutBus,
+		\padIn,     ~padOutBus,
 		\guitar,    ~grainSrc[\guitar].asInteger,
 		\cembalo,   ~grainSrc[\cembalo].asInteger,
 		\tape,      ~grainSrc[\tape].asInteger,
+		\pad,       ~grainSrc[\pad].asInteger,
 	], ~srcGrp);
 	~ptr = Synth(\ptr, [\out, ~ptrBus, \buf, b], ~ptrGrp);
 	~rec = Synth(\rec, [
@@ -200,8 +216,8 @@ s.waitForBoot {
 		\morphAmt,    0,
 	], ~fftGrp);
 
-	// ---- Polyphonic pitch tracker (shared; used by \apePoly and the cembalo) ----
-	// ~tartini keeps its old name. It only runs while the tape synth or the cembalo is in use (~updateChains).
+	// ---- Polyphonic pitch tracker (shared; used by \apePoly, the cembalo and \pad) ----
+	// ~tartini keeps its old name. It only runs while the tape synth, the cembalo or the pad is in use (~updateChains).
 	~tartini = ~polyTrackerNew.(s, (
 		inChan: 0, freqBus: ~freqBus, ampBus: ~ampBus,
 		target: ~tartiniGrp, addAction: \addToHead
@@ -279,6 +295,17 @@ s.waitForBoot {
 		};
 	};
 
+	// ---- Pad chain ----
+	// \pad (synths/pad.scd): one pad voice per tracked note. It reads its faders from CC slots 110–119
+	// (/pad/*), its own volume included, so presets and the generic fader handler work without extra code.
+	// Tweak: ~pad.set(\voiceBalance, 1)  follow the guitar's note levels (0 = all notes equally loud)
+	//        ~pad.set(\freqLag, 0.2)     slower glide between pitches (s)
+	~pad = Synth(\pad, [
+		\ccBus,   ~ccBuses,
+		\polyBus, ~tartini[\block].index,
+		\out,     ~padOutBus,
+	], ~padGrp);
+
 	// ---- Master synths ----
 	// Grain master: reads CC 11 (masterVol) via \master SynthDef; starts enabled.
 	~grainMaster = Synth(\master, [
@@ -303,23 +330,34 @@ s.waitForBoot {
 		\amp,   0.0,
 	], ~masterGrp);
 
+	// Pad output stage: same gate; the pad's own volume is the /pad/volume fader.
+	~padMaster = Synth(\tapeOutput, [
+		\inBus, ~padOutBus,
+		\out,   0,
+		\amp,   0.0,
+	], ~masterGrp);
+
 	// ---- Which chains run ----
-	// tape synth: runs while audible (~synthEnabled[\tape]) or fed to the grains (~grainSrc[\tape]); same for the cembalo.
+	// tape synth: runs while audible (~synthEnabled[\tape]) or fed to the grains (~grainSrc[\tape]); same for the cembalo
+	// and the pad.
 	// The pitch tracker runs while either of them runs. Everything else is paused (no CPU).
 	// Call ~updateChains.() after changing ~synthEnabled or ~grainSrc.
 	~chainNeeds = {
 		var ape  = ~synthEnabled[\tape]    or: { ~grainSrc[\tape] };
 		var cemb = ~synthEnabled[\cembalo] or: { ~grainSrc[\cembalo] };
-		(ape: ape, cembalo: cemb, tracker: ape or: { cemb })
+		var pad  = ~synthEnabled[\pad]     or: { ~grainSrc[\pad] };
+		(ape: ape, cembalo: cemb, pad: pad, tracker: ape or: { cemb } or: { pad })
 	};
 
 	~pauseUnusedChains = {
 		var need = ~chainNeeds.();
 		if(need[\ape].not) { ~ape.run(false) };
 		if(need[\cembalo].not and: { ~cembalo[\enabled] }) { ~cembalo.enable(false) };
+		if(need[\pad].not) { ~pad.run(false) };
 		if(need[\tracker].not) { ~tartini.run(false) };
 		if(~synthEnabled[\tape].not)    { ~tapeMaster.run(false) };
 		if(~synthEnabled[\cembalo].not) { ~cembaloMaster.run(false) };
+		if(~synthEnabled[\pad].not)     { ~padMaster.run(false) };
 	};
 
 	~updateChains = {
@@ -328,15 +366,19 @@ s.waitForBoot {
 		if(need[\tracker]) { ~tartini.run(true) };
 		if(need[\ape]) { ~ape.run(true) };
 		if(need[\cembalo] and: { ~cembalo[\enabled].not }) { ~cembalo.enable(true) };
+		if(need[\pad]) { ~pad.run(true) };
 		if(~synthEnabled[\tape])    { ~tapeMaster.run(true) };
 		if(~synthEnabled[\cembalo]) { ~cembaloMaster.run(true) };
+		if(~synthEnabled[\pad])     { ~padMaster.run(true) };
 		// gains (all lagged, so switching is click-free)
 		~tapeMaster.set(\amp, ~synthEnabled[\tape].asInteger);
 		~cembaloMaster.set(\amp, ~synthEnabled[\cembalo].asInteger);
+		~padMaster.set(\amp, ~synthEnabled[\pad].asInteger);
 		~grainSrcMix.set(
 			\guitar,  ~grainSrc[\guitar].asInteger,
 			\cembalo, ~grainSrc[\cembalo].asInteger,
-			\tape,    ~grainSrc[\tape].asInteger
+			\tape,    ~grainSrc[\tape].asInteger,
+			\pad,     ~grainSrc[\pad].asInteger
 		);
 		// pause the rest once faded out (re-checked then, in case it was switched back on meanwhile)
 		AppClock.sched(0.25, { ~pauseUnusedChains.(); nil });
@@ -573,7 +615,7 @@ s.waitForBoot {
 		nil;
 	});
 
-	"Multi-synth patch booted (grain ON, tape OFF, cembalo OFF; grain input: guitar).".postln;
+	"Multi-synth patch booted (grain ON, tape OFF, cembalo OFF, pad OFF; grain input: guitar).".postln;
 	// Level meters: only where somebody can see them. On the headless Pi (Qt offscreen, see run-sc-main_multi.sh)
 	// they would cost a metering synth and 20 window updates per second in sclang for nothing.
 	if("QT_QPA_PLATFORM".getenv != "offscreen") { s.meter };

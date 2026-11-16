@@ -115,7 +115,7 @@ if (File.exists(~presetDir).not) {
 	data[\ptRateScale]      = ~ptRateScale;
 	data[\ptFixedPosSec]    = ~ptFixedPosSec;
 	data[\samplePath]       = ~samplePath;
-	// main_multi.scd: which sources feed the grain buffer (guitar / cembalo / tape)
+	// main_multi.scd: which sources feed the grain buffer (guitar / cembalo / tape / pad)
 	~grainSrc !? { data[\grainSrc] = ~grainSrc.copy };
 
 	// Write to disk (atomically, see ~writePresetFile)
@@ -286,7 +286,7 @@ OSCdef('/preset/deleteArm', { |msg|
 // Any value the tablet changes that a preset stores marks the preset as changed. Gestures that are not stored
 // (XY pads, sample loading, stop) and the footswitch / expression pedal do not.
 ~presetDirtyIgnore = ["/grain/xy/", "/grain/loadSample", "/grain/deleteBuffer", "/grain/stopAudio"];
-~presetDirtyPrefixes = ["/grain/", "/tape/", "/cembalo/", "/master/"];
+~presetDirtyPrefixes = ["/grain/", "/tape/", "/cembalo/", "/pad/", "/master/"];
 ~presetDirtyWatcher !? { thisProcess.removeOSCRecvFunc(~presetDirtyWatcher) };
 ~presetDirtyWatcher = { |msg, time, addr|
 	var a;
