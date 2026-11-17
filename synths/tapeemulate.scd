@@ -60,11 +60,18 @@ SynthDef(\ape, { |ccBus=0, input_pitch=0, vol=0|
 // as loud as a single note. voiceBalance: 0 = all notes equally loud, 1 = follow the relative level the tracker
 // measures per note (a note 12 dB quieter in the guitar is 12 dB quieter here).
 // Block layout (see classes/inputtracker.scd): +3 heartbeat, +4.. freq, +4+n.. amp, +4+2n.. gate with n = 6 voices.
-SynthDef(\apePoly, { |ccBus=0, polyBus=0, vol=0, atk=0.005, rel=0.25, freqLag=0.02, voiceBalance=0.5, ampRangeDb=60|
+// Picking position (classes/pluckpos.scd; in: the guitar signal, pluckRef / pluckTrack / pluckSpan: calibration):
+// each note keeps the position it was picked at. Near the bridge it gets more saw and a brighter saw, towards the
+// neck more sine and a duller saw. The amount is the pluck fader (CC slot 97); at 0 nothing changes.
+~pluckBrightness ?? {
+	thisProcess.interpreter.executeFile(PathName(thisProcess.nowExecutingPath).pathOnly +/+ "../classes/pluckpos.scd")
+};
+SynthDef(\apePoly, { |ccBus=0, polyBus=0, vol=0, atk=0.005, rel=0.25, freqLag=0.02, voiceBalance=0.5, ampRangeDb=60,
+	in=0, pluckRef=800, pluckTrack=0.5, pluckSpan=0.75|
 	var n = 6, header = 4;  // == ~polyTrackerVoices, ~polyTrackerHeader (inputtracker.scd is loaded after this file)
-	var ccVals, badness, wavemix, waveMap, badnessMap, reverb_mix, reverb_room, master_vol;
+	var ccVals, badness, wavemix, waveMap, badnessMap, reverb_mix, reverb_room, master_vol, pluck;
 	var volSig, alive, vFreq, vAmp, vGate, noteStart, freq, gateEnv, ampHeld, ampMax, weight, level, norm;
-	var fb, voices, sig;
+	var pos, voiceMix, sawCutoff, fb, voices, sig;
 
 	volSig = In.kr(vol);
 	ccVals = In.kr(ccBus, 128);
@@ -75,6 +82,7 @@ SynthDef(\apePoly, { |ccBus=0, polyBus=0, vol=0, atk=0.005, rel=0.25, freqLag=0.
 	reverb_mix = Select.kr(~busNames[\reverb_mix].index, ccVals);
 	reverb_room = Select.kr(~busNames[\reverb_room].index, ccVals);
 	master_vol = Select.kr(~busNames[\master].index, ccVals);
+	pluck = Select.kr((~busNames[\pluck] ? (index: 97)).index, ccVals);  // not in the mappings of the mono patches
 
 	// identical to \ape: both scale with the overall input level
 	badness = ((badness * 7 * volSig) + (badnessMap * volSig)).clip(0, 7);
@@ -98,6 +106,13 @@ SynthDef(\apePoly, { |ccBus=0, polyBus=0, vol=0, atk=0.005, rel=0.25, freqLag=0.
 	level = gateEnv * weight;
 	norm = level.squared.sum.max(1).sqrt.reciprocal;  // equal-power mix; no change while at most one note sounds
 
+	// picking position per note: followed for the first 20 ms of the note (the pick's attack; a low string needs
+	// more than one period of 12 ms before its brightness can be read), then kept
+	pos = ~pluckPosition.(~pluckBrightness.(In.ar(in)), vFreq, pluckRef, pluckTrack, pluckSpan);
+	pos = Gate.kr(pos, Trig1.kr(noteStart, 0.02)) * pluck;
+	voiceMix = (wavemix + (pos * 0.5)).clip(0, 1);
+	sawCutoff = 2500 * (2 ** (pos * 1.5));  // 880 Hz .. 7 kHz
+
 	fb = LocalIn.ar(2 * n).clump(2);
 	voices = n.collect { |i|
 		var x, p, sine, saw;
@@ -106,8 +121,8 @@ SynthDef(\apePoly, { |ccBus=0, polyBus=0, vol=0, atk=0.005, rel=0.25, freqLag=0.
 		x = x * badness;
 		p = (x * freq[i] * 0.25) + freq[i];
 		sine = SinOsc.ar(p, 0, 1);
-		saw = LPF.ar(LFSaw.ar(p, 0, 1), 2500);
-		((wavemix * saw) + ((1 - wavemix) * sine)) * (volSig * level[i])
+		saw = LPF.ar(LFSaw.ar(p, 0, 1), sawCutoff[i]);
+		((voiceMix[i] * saw) + ((1 - voiceMix[i]) * sine)) * (volSig * level[i])
 	};
 	LocalOut.ar(voices.flatten);
 

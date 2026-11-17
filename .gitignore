@@ -1,0 +1,3 @@
+recordings/*
+!recordings/.gitkeep
+ui/__pycache__/

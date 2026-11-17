@@ -4,9 +4,10 @@
 // Requires: ~oscMap, ~busToOsc        (osc_mappings_multi.scd)
 //           ~ccBuses, ~busNames       (midiconfig_multi.scd)
 //           ~rec, ~g, ~ptr, b        (main_multi.scd)
-//           ~grainMaster, ~tapeMaster, ~cembaloMaster (main_multi.scd)
+//           ~grainMaster, ~tapeMaster, ~cembaloMaster, ~padMaster (main_multi.scd)
 //           ~synthEnabled, ~grainSrc, ~focusedSynth, ~updateChains,
 //           ~setCembaloParam, ~cembaloSpecs (main_multi.scd)
+//           ~xyTouch, ~setXYMap, ~setXYHold, ~xyMaps, ~xyMapOrder (main_multi.scd)
 //
 // Loaded INSIDE s.waitForBoot in main_multi.scd, after synth
 // instantiation so all synth handles are available.
@@ -76,13 +77,13 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 // ---- Synth focus feedback ----
 // Sends /synth/<name>/focused back to TouchOSC.
 ~sendFocusFeedback = {
-	[\grain, \tape, \cembalo].do { |name|
+	[\grain, \tape, \cembalo, \pad].do { |name|
 		~sendToTouchOSC.("/synth/" ++ name ++ "/focused", (~focusedSynth == name).asInteger.asFloat);
 	};
 };
 
 // Grain input source toggles: ~grainSrc key → OSC address
-~grainSrcAddr = ( guitar: "/grain/srcGuitar", cembalo: "/grain/srcCembalo", tape: "/grain/srcTape" );
+~grainSrcAddr = ( guitar: "/grain/srcGuitar", cembalo: "/grain/srcCembalo", tape: "/grain/srcTape", pad: "/grain/srcPad" );
 ~sendGrainSrcFeedback = {
 	~grainSrcAddr.keysValuesDo { |name, addr|
 		~sendToTouchOSC.(addr, ~grainSrc[name].asInteger.asFloat);
@@ -98,6 +99,51 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~touchOSC.sendMsg('/grain/bufferLen-label', durSec.round(0.1).asString ++ " s");
 };
 
+// ---- FFT effect: what its stepped / bipolar controls are set to, in real units ----
+// The same curves as in synths/fft_prism.scd (keep them in sync).
+~fftBipolar = { |v, dead = 0.06| var d = (v - 0.5) * 2; d.sign * ((d.abs - dead).max(0) / (1 - dead)) };
+~signed = { |v, digits = 0.1| if (v > 0, "+", "") ++ v.round(digits).asString };
+~faderLabels = (
+	'/grain/fftWarp': { |v|
+		var semi = (~fftBipolar.(v) * 12).round.asInteger;
+		if (semi == 0) { "off" } { ~signed.(semi, 1) ++ " st" }
+	},
+	'/grain/fftTime': { |v| (v.squared * 1.5 + 0.045).round(0.01).asString ++ " s" },
+	'/grain/fftSource': { |v| case { v < 0.02 } { "grains" } { v > 0.98 } { "input" } { (v * 100).round.asInteger.asString ++ " % in" } },
+	'/grain/fftTilt': { |v|
+		var w = ~fftBipolar.(v, 0.04);
+		case
+		{ w < 0 } { "LP " ++ (24000 * (0.004 ** w.abs)).round(10).asInteger ++ " Hz" }
+		{ w > 0 } { "HP " ++ (24000 * ((125 ** w) - 1) * 0.002).round(10).asInteger ++ " Hz" }
+		{ "open" }
+	},
+);
+~sendFaderLabel = { |addr, val|
+	~faderLabels[addr.asSymbol] !? { |fn| ~touchOSC.sendMsg(addr.asString ++ "-label", fn.(val)) };
+};
+
+// ---- FFT pad: x = frequency shift per round (fftSpiral), y = feedback (fftFeedback) ----
+~sendFftPadLabel = { |x, y|
+	var hz = ~fftBipolar.(x) ** 3 * 600;
+	var fb = y.lincurve(0, 1, 0, 1.05, -2.5);
+	~touchOSC.sendMsg('/grain/fftPad-label',
+		"shift " ++ if (hz == 0) { "off" } { ~signed.(hz, if (hz.abs < 10, 0.01, 1)) ++ " Hz" }
+		++ "   ·   feedback " ++ if (fb >= 1) { "endless" } { (fb * 100).round.asInteger.asString ++ " %" });
+};
+~sendFftPad = { |x, y|
+	~touchOSC.sendMsg('/grain/fftPad', x.asFloat, y.asFloat);
+	~sendFftPadLabel.(x, y);
+};
+
+// ---- MultiXY page: mapping buttons, hold, the line that says what the axes do ----
+~sendXYState = {
+	~xyMapOrder.do { |name|
+		~sendToTouchOSC.("/grain/xyMap/" ++ name, (name == ~xyMap).asInteger.asFloat);
+	};
+	~sendToTouchOSC.('/grain/xyHold', ~xyHold.asInteger.asFloat);
+	~touchOSC.sendMsg('/grain/xyHint', ~xyMaps[~xyMap][\hint]);
+};
+
 // ---- Send all fader + toggle state to TouchOSC (boot sync / preset load) ----
 // faderVals (optional): busIndex -> value, used instead of reading the buses back. Right after a preset
 // has set the buses, the server has not applied them yet and getnSynchronous still returns the old values.
@@ -108,25 +154,27 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~oscMap.keysValuesDo { |addr, spec|
 		if (spec[\type] == \fader) {
 			~sendToTouchOSC.(addr, allVals.at(spec[\busIndex]));
+			~sendFaderLabel.(addr, allVals.at(spec[\busIndex]));
 		};
 	};
+	~sendFftPad.(allVals[~busNames[\fftSpiral].index], allVals[~busNames[\fftFeedback].index]);
 	~touchOSC.sendMsg('/grain/timeStretch-label', ~timeStretchLabel.(allVals[~busNames[\timeStretch].index]));
 	~sendBufferLenLabel.(~bufferDurSec);
 
-	// Recorder (REC button + status line) and grain toggles
-	~sendRecStatus.();
+	// Grain loop (LIVE button + status line), sample slots, output recorder, grain toggles
+	~sendBufferStatus.();
+	~sendSampleSlots.();
+	~sendOutRecStatus.();
 	~sendToTouchOSC.('/grain/reverse',     ~reverseState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fixedPos',    ~fixedPosState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fftFreeze',   ~fftFreezeState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/xyMode',         ~xyMode.asInteger.asFloat);
+	~sendXYState.();
 	~sendToTouchOSC.('/grain/densFromDur',    ~densFromDurState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/pitchTrackMode', ~pitchTrackMode.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/pitchMode/pos',
 		(~ptFixedPosSec / ~bufferDurSec.max(0.001)).clip(0.0, 1.0).asFloat);
 	~sendToTouchOSC.('/grain/pitchMode/rateScale', ~ptRateScale.asFloat);
-
-	// Disk recording
-	~sendToTouchOSC.('/record/disk', (~diskRecState ? false).asInteger.asFloat);
 
 	// Status
 	~sendToTouchOSC.('/status/rate',      ~currentRate.asFloat);
@@ -136,6 +184,7 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~sendToTouchOSC.('/synth/grain/enable', ~synthEnabled[\grain].asInteger.asFloat);
 	~sendToTouchOSC.('/synth/tape/enable',  ~synthEnabled[\tape].asInteger.asFloat);
 	~sendToTouchOSC.('/synth/cembalo/enable', ~synthEnabled[\cembalo].asInteger.asFloat);
+	~sendToTouchOSC.('/synth/pad/enable',  ~synthEnabled[\pad].asInteger.asFloat);
 	~sendFocusFeedback.();
 	~sendGrainSrcFeedback.();
 
@@ -153,9 +202,19 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 			var val = msg[1].clip(0.0, 1.0);
 			~ccBuses.setAt(spec[\busIndex], val);
 			~sendToTouchOSC.(addr, val);
+			~sendFaderLabel.(addr, val);
 		}, addr.asString);
 	};
 };
+
+// ---- FFT pad (an XY control: x, y, touch) ----
+// Not echoed while it is touched: the pad would fight the finger. The label follows.
+OSCdef('/grain/fftPad', { |msg|
+	var x = msg[1].clip(0.0, 1.0), y = msg[2].clip(0.0, 1.0);
+	~ccBuses.setAt(~busNames[\fftSpiral].index, x);
+	~ccBuses.setAt(~busNames[\fftFeedback].index, y);
+	~sendFftPadLabel.(x, y);
+}, "/grain/fftPad");
 
 // ---- Cembalo faders: override the generic handler (the cembalo's parameters live in sclang) ----
 ~cembaloSpecs.keysDo { |key|
@@ -163,9 +222,9 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	OSCdef(addr.asSymbol, { |msg| ~setCembaloParam.(key, msg[1]) }, addr);
 };
 
-// ---- Grain input sources: guitar / cembalo / tape synth, any combination ----
+// ---- Grain input sources: guitar / cembalo / tape synth / pad, any combination ----
 // Latching buttons in TouchOSC: the value is the new state. A source that is not audible on its own
-// (cembalo / tape enable off) is started anyway while it feeds the grains.
+// (cembalo / tape / pad enable off) is started anyway while it feeds the grains.
 ~grainSrcAddr.keysValuesDo { |name, addr|
 	OSCdef(addr.asSymbol, { |msg|
 		var on = msg[1] >= 0.5;
@@ -217,8 +276,8 @@ OSCdef('/grain/bufferLen', { |msg|
 // All on/off buttons are toggle buttons on the tablet: the value IS the new state (1 = on, 0 = off), and
 // the state is sent back so the button always shows what the patch does.
 
-// REC: the one switch of the recorder (main_multi.scd, ~setRecording)
-OSCdef('/grain/record', { |msg| ~setRecording.(msg[1] >= 0.5) }, "/grain/record");
+// LIVE: the one switch of the grain loop (main_multi.scd, ~setLiveMode)
+OSCdef('/grain/liveMode', { |msg| ~setLiveMode.(msg[1] >= 0.5) }, "/grain/liveMode");
 
 OSCdef('/grain/reverse', { |msg|
 	if (msg[1] >= 1.0) {
@@ -255,9 +314,8 @@ OSCdef('/grain/pitchTrackMode', { |msg|
 			~g.set(\fixedPos, 1);
 			~fixedPosState = true;
 			~sendToTouchOSC.('/grain/fixedPos', 1.0);
-			// Stop live mode
-			if (~liveMode) { ~stopLiveMode.() };
-			~sendToTouchOSC.('/grain/liveMode', 0.0);
+			// Stop live mode: the loop holds still
+			~setLiveMode.(false);
 			// Force Impulse trigger + no rate scatter (not CC-bus driven)
 			~g.set(\sync, 1, \rateRand, 1);
 			// Zero modulation CC buses + send slider feedback to TouchOSC
@@ -311,7 +369,7 @@ OSCdef('/grain/xyMode', { |msg|
 		if (~xyMode) {
 			~g !? { ~g.run(false) };
 		} {
-			5.do { |i| ~releaseXYVoice.(i) };
+			~releaseAllXYVoices.();
 			~g !? { ~g.run(true) };
 		};
 		("XY Mode: " ++ if(~xyMode, "ON", "OFF")).postln;
@@ -329,13 +387,19 @@ OSCdef('/grain/xyMode', { |msg|
 		var x = msg[1].clip(0.0, 1.0);
 		var y = msg[2].clip(0.0, 1.0);
 		var z = if (msg.size >= 4) { msg[3] } { 1.0 };
-		if (z <= 0) {
-			~releaseXYVoice.(idx);
-		} {
-			~spawnXYVoice.(idx, x, y);
-		};
+		~xyTouch.(idx, x, y, z);
 	}, addr);
 };
+
+// ---- MultiXY: mapping (one of the buttons is lit) and hold ----
+// Toggle buttons on the tablet; tapping the lit one keeps it lit.
+~xyMapOrder.do { |name|
+	var addr = "/grain/xyMap/" ++ name;
+	OSCdef(addr.asSymbol, { |msg|
+		if (msg[1] >= 0.5) { ~setXYMap.(name) } { ~sendXYState.() };
+	}, addr);
+};
+OSCdef('/grain/xyHold', { |msg| ~setXYHold.(msg[1] >= 0.5) }, "/grain/xyHold");
 
 // ---- Master volume: override generic fader to drive synth arg directly ----
 OSCdef('/master/volume', { |msg|
@@ -372,44 +436,43 @@ OSCdef('/grain/pitchReset', { |msg|
 	};
 }, "/grain/pitchReset");
 
-// CLEAR and LOAD SAMPLE: push buttons, act on the press
+// CLEAR: a push button, acts on the press
 OSCdef('/grain/deleteBuffer', { |msg|
 	if (msg[1] >= 0.5) { ~deleteBuffer.() };
 }, "/grain/deleteBuffer");
-
-OSCdef('/grain/loadSample', { |msg|
-	if (msg[1] >= 0.5) { ~loadBuffer.(nil) };
-}, "/grain/loadSample");
 
 OSCdef('/grain/stopAudio', { |msg|
 	if (msg[1] >= 1.0) {
 		"Stopping all audio...".postln;
 		~speedUpdater.stop;
-		5.do { |i| ~releaseXYVoice.(i) };
+		~releaseAllXYVoices.();
 		s.freeAll;
 	};
 }, "/grain/stopAudio");
 
-// ---- Disk recording (master output to file) ----
-~diskRecState = false;
-
+// ---- Output recorder: REC in the right column (main_multi.scd, ~startOutputRecording) ----
+// A toggle button: the value is the new state, the state is sent back.
 OSCdef('/record/disk', { |msg|
-	var on = msg[1] >= 0.5;
-	if (on != ~diskRecState) {
-		~diskRecState = on;
-		if (~diskRecState) {
-			s.record;
-			("Disk recording STARTED: " ++ s.recorder.path).postln;
-		} {
-			s.stopRecording;
-			"Disk recording STOPPED.".postln;
-		};
-		~sendToTouchOSC.('/record/disk', ~diskRecState.asInteger.asFloat);
-	};
+	if (msg[1] >= 0.5) { ~startOutputRecording.() } { ~stopOutputRecording.() };
 }, "/record/disk");
 
+// ---- Sample slots A-D on the preset page: load the first four files of samples/ into the grain buffer ----
+// Push buttons: act on the press; on release the slot of the loaded sample is lit again.
+~sampleSlotCount.do { |i|
+	var addr = "/preset/sample/" ++ i;
+	OSCdef(addr.asSymbol, { |msg|
+		if (msg[1] >= 0.5) {
+			~loadSampleSlot.(i);
+			// a preset stores its sample: choosing another one is a change to the loaded preset
+			if (~activePreset >= 0 and: { ~presetDirty.not }) { ~presetDirty = true; ~sendPresetName.() };
+		} {
+			~sendSampleSlots.();
+		};
+	}, addr);
+};
+
 // ---- Synth enable/disable ----
-// ~setSynthEnabled.(\grain | \tape | \cembalo, bool, focus)
+// ~setSynthEnabled.(\grain | \tape | \cembalo | \pad, bool, focus)
 // Used by the tablet buttons and the footswitch (midiconfig_multi.scd). focus: also point the expression pedal
 // at this synth when it is switched on (the tablet does that; the footswitch does not).
 ~setSynthEnabled = { |name, on, focus = true|
@@ -422,14 +485,14 @@ OSCdef('/record/disk', { |msg|
 			~grainMaster !? { ~grainMaster.run(true) };
 		} {
 			// Release XY voices, then pause grain chain
-			5.do { |i| ~releaseXYVoice !? { ~releaseXYVoice.(i) } };
+			~releaseAllXYVoices !? { ~releaseAllXYVoices.() };
 			~g !? { ~g.run(false) };
 			~fftFx !? { ~fftFx.run(false) };
 			~grainMaster !? { ~grainMaster.run(false) };
 			// ~mic / ~ptr / ~rec kept running so the buffer stays current
 		};
 	} {
-		// tape / cembalo: starts / fades in, or fades out and pauses (unless it still feeds the grains)
+		// tape / cembalo / pad: starts / fades in, or fades out and pauses (unless it still feeds the grains)
 		~updateChains.();
 	};
 	if (on and: { focus }) {
@@ -440,7 +503,7 @@ OSCdef('/record/disk', { |msg|
 	(name.asString ++ ": " ++ if(on, "ENABLED", "DISABLED")).postln;
 };
 
-[\grain, \tape, \cembalo].do { |name|
+[\grain, \tape, \cembalo, \pad].do { |name|
 	var addr = "/synth/" ++ name ++ "/enable";
 	OSCdef(addr.asSymbol, { |msg| ~setSynthEnabled.(name, msg[1] >= 0.5) }, addr);
 };
@@ -448,7 +511,7 @@ OSCdef('/record/disk', { |msg|
 // ---- Synth focus (MIDI expression pedal routing) ----
 OSCdef('/synth/focus', { |msg|
 	var name = msg[1].asSymbol;
-	if (#[\grain, \tape, \cembalo].includes(name)) {
+	if (#[\grain, \tape, \cembalo, \pad].includes(name)) {
 		~focusedSynth = name;
 		~sendFocusFeedback.();
 		("Focused synth: " ++ name).postln;

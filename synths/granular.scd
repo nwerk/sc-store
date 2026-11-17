@@ -104,6 +104,12 @@ SynthDef.new(\gran, {
 	fixedPosRand=0,    // 0–1: per-grain scatter radius around fixedPosSec (fraction of buffer duration)
 	xyMode=0,          // 0: normal CC-bus mode; 1: XY voice mode (bypasses 4 CC reads, overrides candidateCenter)
 	maxDensHz=20000,   // XY mode only: per-voice density ceiling (Hz); set by client proportional to voice count
+	// ---- XY voice controls (xyMode=1 only; set per touch by the XY mappings in main_multi.scd) ----
+	xyDens=0,          // > 0: grains per second of this voice (instead of the density fader); still capped by maxDensHz
+	xyRate=1,          // pitch factor on top of the pitch fader; negative = backwards
+	xyAmp=1,           // level of this voice
+	xyPan=0,           // -1..1: where this voice sits (random pan is added around it)
+	xyCutoff=20000,    // Hz: low-pass of this voice (the lower of this and the filter fader is used)
 	densFromDurMode=0, // 0/1: derive density from duration for seamless reconstruction
 	timeStretch=1.0,   // playback speed multiplier (0.25–4.0×); only active in densFromDurMode
 	// ---- Pitch-tracker mode ----
@@ -118,7 +124,7 @@ SynthDef.new(\gran, {
 	var sig, env;
 	var densCtrl, durCtrl, rateCtrl, panCtrl;
 	var ptr, ptrRand, posSec;
-	var bufFrames, safeMarginSamples;
+	var bufFrames, bufSR, safeMarginSamples;
 	var octaveMultiplier, detuneOffset, freqMod;
 	var bitStepSize, bitCrushed, tanhDrive;
 	var octaveGate;
@@ -150,7 +156,7 @@ SynthDef.new(\gran, {
 	dens         = Select.kr(~busNames[\density].index, ccVals).squared.linlin(0, 1, 0.001, 1);
 	dens         = 1.0 / (dens * 0.8).max(0.005);            // 0–800ms interval → Hz
 	// In XY mode, cap density to per-voice share (client sets maxDensHz proportionally to voice count)
-	dens         = Select.kr(xyMode, [dens, dens.min(maxDensHz)]);
+	dens         = Select.kr(xyMode, [dens, Select.kr(xyDens > 0, [dens, xyDens]).min(maxDensHz)]);
 	// CC 21: grain duration (0–1000ms) — bypassed in XY mode (arg value used directly)
 	baseDur      = Select.kr(xyMode, [
 		Select.kr(~busNames[\baseDur].index, ccVals).linlin(0, 1, 0.01, 1.0),
@@ -169,6 +175,8 @@ SynthDef.new(\gran, {
 		Select.kr(~busNames[\randDetune].index, ccVals) * 100,
 		randDetune
 	]);
+	// XY voices: their own pitch factor (the mappings glide or step it)
+	rate         = rate * Select.kr(xyMode, [1, xyRate.lag(0.03)]);
 	// CC 58/59: LFO frequency modulation
 	freqModAmt   = Select.kr(~busNames[\freqModAmt].index, ccVals) * 5;
 	freqModFreq  = Select.kr(~busNames[\freqModFreq].index, ccVals) * 5;
@@ -276,7 +284,7 @@ SynthDef.new(\gran, {
 	durCtrl = baseDur * LFNoise1.ar(100).exprange(1 / durRand.max(0.01), durRand.max(0.01));
 
 	// Panning
-	panCtrl = LFNoise1.kr(100).bipolar(panRand);
+	panCtrl = (LFNoise1.kr(100).bipolar(panRand) + Select.kr(xyMode, [0, xyPan.lag(0.05)])).clip(-1, 1);
 
 	// ============================================================
 	// 4. PLAYHEAD SAFETY (trajectory-based)
@@ -291,7 +299,9 @@ SynthDef.new(\gran, {
 	// Unsafe iff any integer k satisfies dMin-margin ≤ k*bufFrames ≤ dMax+margin.
 	// ============================================================
 
-	bufFrames        = BufFrames.ir(buf);
+	// .kr, not .ir: the buffer is swapped for a sample or a new length while the synth runs
+	bufFrames        = BufFrames.kr(buf);
+	bufSR            = BufSampleRate.kr(buf);  // positions in seconds -> frames (a sample can be 44.1 kHz)
 	safeMarginSamples = safeMargin * SampleRate.ir;
 
 	ptr          = In.ar(ptrBus, 1);
@@ -315,7 +325,7 @@ SynthDef.new(\gran, {
 			(ptr - desiredDelay).wrap(0, bufFrames),                   // normal mode
 			(ptr - desiredDelay + tsOffset).wrap(0, bufFrames)         // reconstruction mode
 		]),
-		(fixedPosSec * SampleRate.ir + ptrRand).wrap(0, bufFrames)
+		(fixedPosSec * bufSR + ptrRand).wrap(0, bufFrames)
 	]);
 
 	d0       = candidateCenter - (0.5 * durSamp * grainRate) - ptr;
@@ -345,7 +355,7 @@ SynthDef.new(\gran, {
 	safeCenter = Select.ar(isUnsafe,         [candidateCenter, (candidateCenter + snapDelta).wrap(0, bufFrames)]);
 	safeCenter = Select.ar(spanExceedsBuffer, [safeCenter,      fallbackCenter]);
 
-	posSec = safeCenter / bufFrames * BufDur.ir(buf);
+	posSec = safeCenter / bufFrames * BufDur.kr(buf);
 
 	// ---- Read-pointer sine modulation (CC 56/57) ----
 	// Sine LFO smoothly slows/freezes grain read position each cycle.
@@ -366,21 +376,21 @@ SynthDef.new(\gran, {
 	fixedPosTrig  = K2A.ar(fixedPos);
 	fixedPosRise  = HPZ1.ar(fixedPosTrig) > 0;                          // one-sample rising edge
 	fpHasPressed  = Latch.ar(fixedPosTrig, fixedPosRise);               // stays 1 after first press
-	fpLatchFrame  = Latch.ar(posSec * SampleRate.ir, fixedPosRise);     // heard pos in frames at press
-	fpLatchDelay  = Latch.ar(ptr - (posSec * SampleRate.ir), fixedPosRise); // write-head offset at press
+	fpLatchFrame  = Latch.ar(posSec * bufSR, fixedPosRise);     // heard pos in frames at press
+	fpLatchDelay  = Latch.ar(ptr - (posSec * bufSR), fixedPosRise); // write-head offset at press
 
 	fpResumeFrame = (ptr - fpLatchDelay).wrap(0, bufFrames);            // moves forward from latch point
 	fpFrozenFrame = (fpLatchFrame + (LFNoise1.ar(100) * fixedPosRand * bufFrames)).clip(0, bufFrames - 1);
 
 	normalModePosSec = Select.ar(fixedPosTrig, [
-		Select.ar(fpHasPressed, [posSec, fpResumeFrame / bufFrames * BufDur.ir(buf)]),  // 0: live or resume
-		fpFrozenFrame / bufFrames * BufDur.ir(buf)                                      // 1: frozen
+		Select.ar(fpHasPressed, [posSec, fpResumeFrame / bufFrames * BufDur.kr(buf)]),  // 0: live or resume
+		fpFrozenFrame / bufFrames * BufDur.kr(buf)                                      // 1: frozen
 	]);
 
 	// XY mode: original fixedPosSec-arg path — XY voices set this from touch X.
 	xyFixedPosSec = Select.ar(fixedPosTrig, [
 		posSec,
-		(fixedPosSec + (LFNoise1.ar(100) * fixedPosRand * BufDur.ir(buf))).clip(0, BufDur.ir(buf))
+		(fixedPosSec + (LFNoise1.ar(100) * fixedPosRand * BufDur.kr(buf))).clip(0, BufDur.kr(buf))
 	]);
 
 	posSec = Select.ar(K2A.ar(xyMode), [normalModePosSec, xyFixedPosSec]);
@@ -401,7 +411,7 @@ SynthDef.new(\gran, {
 		interp:      4,
 	);
 
-	sig = sig * env * amp * Select.kr(pitchTrackMode, [1.0, ptAmp]);
+	sig = sig * env * amp * Select.kr(pitchTrackMode, [1.0, ptAmp]) * Select.kr(xyMode, [1, xyAmp.lag(0.05)]);
 
 	// ============================================================
 	// 6. EFFECTS CHAIN (bit crusher → tanh soft-clip → LPF)
@@ -419,7 +429,7 @@ SynthDef.new(\gran, {
 	sig = Select.ar(K2A.ar(bitDepth >= 1.0), [bitCrushed, sig]);
 
 	// Low-pass filter (independent of bit crusher)
-	sig = LPF.ar(sig, freq: filterFreq);
+	sig = LPF.ar(sig, freq: Select.kr(xyMode, [filterFreq, filterFreq.min(xyCutoff.lag(0.05))]));
 
 	Out.ar(out, sig);
 }).add;

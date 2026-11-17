@@ -17,6 +17,9 @@
 	decay: 3.0,           // ring time of a 220 Hz note in seconds (lower notes ring longer)
 	// touch: guitar input level (dBFS RMS over 10 ms) that counts as the softest / hardest pick
 	velDbLo: -50, velDbHi: -12, velCurve: 1.2, velRange: 30,
+	// picking position on the guitar (bridge = thin and bright, neck = round): 0 = ignored, 1 = full effect;
+	// pluckRef / pluckSpan / pluckTrack: calibration, see classes/pluckpos.scd (~cembalo.monitor(true) helps)
+	pluck: 0, pluckRef: 800, pluckSpan: 0.75, pluckTrack: 0.5,
 	maxVoices: 12,
 	statsEvery: 0         // seconds between tracker load reports in the post window (0 = off)
 );
@@ -45,7 +48,8 @@ s.waitForBoot {
 	~tracker = ~polyTrackerNew.(s, (inChan: st[\inChan])).start;
 
 	~cembalo = ~cembaloNew.(s, ~tracker, (inBus: ~micBus, out: 0, maxVoices: st[\maxVoices], volume: st[\volume]));
-	[\revMix, \room, \bright, \noise, \warmth, \weird, \octave, \decay, \velDbLo, \velDbHi, \velCurve, \velRange].do { |k|
+	[\revMix, \room, \bright, \noise, \warmth, \weird, \octave, \decay, \velDbLo, \velDbHi, \velCurve, \velRange,
+		\pluck, \pluckRef, \pluckSpan, \pluckTrack].do { |k|
 		~cembalo.set(k, st[k]);
 	};
 	~cembalo.enable(true);

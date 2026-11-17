@@ -10,6 +10,11 @@ User=patch
 Environment=JACK_NO_AUDIO_RESERVATION=1
 Environment=JACK_PROMISCUOUS_SERVER=jack
 ExecStart=/usr/local/sc-patches/boot-sc.sh
+# Realtime scheduling and locked memory for scsynth's audio thread and the pitch tracker. A systemd service does
+# not get the limits of a login session (/etc/security/limits.d), so without these lines both may run without
+# realtime priority when started at boot: the tracker then logs "no realtime priority".
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
 # Restart if sclang crashes; give Jack time to settle after a crash
 Restart=on-failure
 RestartSec=10

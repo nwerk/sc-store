@@ -13,7 +13,8 @@ real-time synthesizers and audio effects controlled via MIDI hardware.
 - **Target Platform:** Linux (Raspberry Pi + pisound HAT), with Windows fallback
 - **MIDI Hardware:** MIDI Mix controller, FS-1-WL USB-MIDI footswitch
 - **No SuperCollider plugins/Quarks** — all audio synthesis is native SuperCollider. The only external
-  process is the polyphonic pitch tracker (`tracker/`, numpy + JACK-Client), started from `inputtracker.scd`
+  process is the polyphonic pitch tracker (`tracker/`: Python with numpy + JACK-Client, or its C++ port in
+  `tracker/native/`, used when built), started from `inputtracker.scd`
 
 ## Repository Structure
 
@@ -24,7 +25,8 @@ sc-store/
 ├── main_tape.scd         # Tape emulation effect patch
 ├── classes/              # Shared SuperCollider classes
 │   ├── inputtracker.scd  # Polyphonic ML pitch tracker bridge (~polyTrackerNew) + onset/amp SynthDef
-│   └── master.scd        # Master output volume control
+│   ├── master.scd        # Master output volume control
+│   └── pluckpos.scd      # Picking position (bridge / neck) from the guitar's brightness, for cembalo + tape synth
 ├── tracker/              # Polyphonic guitar pitch tracker (Python, see tracker/README.md)
 ├── ui/                   # TouchOSC layout (main.tosc) + its version stamp / manifest (see ui/README.md)
 ├── config/
@@ -35,8 +37,10 @@ sc-store/
 │   ├── midiconfig.scd    # MIDI device init + CC bus management
 │   └── mappings/         # Per-patch MIDI CC parameter mappings
 ├── synths/               # SynthDef definitions
+│   ├── pad.scd           # \pad: wobbly tape pad, played by the pitch tracker
 │   ├── bouncing_ball.scd # Physical-modeling bouncing ball synth
 │   ├── scramble.scd      # FFT bin scramble effect
+│   ├── fft_prism.scd     # Spectral feedback effect after the grains (main_multi.scd; core UGens only)
 │   └── tapeemulate.scd   # Tape saturation + reverb effect
 ├── run-sc-main_tape.sh   # Production launcher (tape patch)
 └── run_main_bounce-sc.sh # Production launcher (bouncing ball)

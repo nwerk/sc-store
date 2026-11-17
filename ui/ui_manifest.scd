@@ -9,6 +9,7 @@
 //   /cembalo/decay FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/noise FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/octave FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /cembalo/pluck FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/revMix FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/room FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /cembalo/volume FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -22,16 +23,28 @@
 //   /grain/density FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/duration FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/feedback FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
-//   /grain/fftFilter FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftBlur FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftFlicker FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/fftFreeze BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/fftFreezeVol FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
-//   /grain/fftMorph FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftPad XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
+//   /grain/fftPad-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftSieve FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftSmear FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftSource FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftSource-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftTilt FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftTilt-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftTime FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftTime-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/fftWarp FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/fftWarp-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /grain/filterFreq FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/fixedPos BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/freqModAmt FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/freqModFreq FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/jitter FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
-//   /grain/loadSample BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/liveMode BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/octaveDown BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/octaveUp BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/panRand FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -42,11 +55,11 @@
 //   /grain/randDetune FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/randomOctave FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/recStatus LABEL button=- send=1 receive=1 args=VALUE:STRING:text:0:1
-//   /grain/record BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/speedModDepth FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/speedModRate FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/srcCembalo BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/srcGuitar BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/srcPad BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/srcTape BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/timeStretch FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/timeStretch-label LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
@@ -55,8 +68,24 @@
 //   /grain/xy/3 XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
 //   /grain/xy/4 XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
 //   /grain/xy/5 XY button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1,VALUE:FLOAT:y:0:1,VALUE:INTEGER:touch:0:1
+//   /grain/xyHint LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /grain/xyHold BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/bow BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/classic BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/harp BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/xyMap/pulse BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/xyMode BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /master/volume FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/age FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/attack FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/detune FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/release FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/reverb FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/tone FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/volume FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/wave FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/wobble FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /pad/wobbleRate FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /pager1 PAGER button=- send=1 receive=1 args=VALUE:INTEGER:page:0:1
 //   /preset/deleteArm BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /preset/label/0 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
@@ -76,6 +105,14 @@
 //   /preset/label/8 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/label/9 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/name LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sample/0 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sample/1 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sample/2 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sample/3 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sampleLabel/0 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sampleLabel/1 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sampleLabel/2 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sampleLabel/3 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/saveArm BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /preset/status LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/tap/0 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -94,12 +131,16 @@
 //   /preset/tap/7 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /preset/tap/8 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /preset/tap/9 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /record/disk BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /record/status LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /status/heartbeat BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /synth/cembalo/enable BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /synth/grain/enable BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /synth/pad/enable BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /synth/tape/enable BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/badness FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/badnessmap FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /tape/pluck FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/reverbMix FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/reverbRoom FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /tape/volume FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -109,14 +150,15 @@
 // ============================================================
 
 ~uiContract = (
-	hash: "0717a073",
-	build: "2026-11-14",
+	hash: "56a01821",
+	build: "2026-11-17",
 	// addresses the tablet sends (each needs an OSCdef)
 	sends: [
 		"/cembalo/bright",
 		"/cembalo/decay",
 		"/cembalo/noise",
 		"/cembalo/octave",
+		"/cembalo/pluck",
 		"/cembalo/revMix",
 		"/cembalo/room",
 		"/cembalo/volume",
@@ -129,16 +171,23 @@
 		"/grain/density",
 		"/grain/duration",
 		"/grain/feedback",
-		"/grain/fftFilter",
+		"/grain/fftBlur",
+		"/grain/fftFlicker",
 		"/grain/fftFreeze",
 		"/grain/fftFreezeVol",
-		"/grain/fftMorph",
+		"/grain/fftPad",
+		"/grain/fftSieve",
+		"/grain/fftSmear",
+		"/grain/fftSource",
+		"/grain/fftTilt",
+		"/grain/fftTime",
+		"/grain/fftWarp",
 		"/grain/filterFreq",
 		"/grain/fixedPos",
 		"/grain/freqModAmt",
 		"/grain/freqModFreq",
 		"/grain/jitter",
-		"/grain/loadSample",
+		"/grain/liveMode",
 		"/grain/octaveDown",
 		"/grain/octaveUp",
 		"/grain/panRand",
@@ -148,11 +197,11 @@
 		"/grain/playheadRand",
 		"/grain/randDetune",
 		"/grain/randomOctave",
-		"/grain/record",
 		"/grain/speedModDepth",
 		"/grain/speedModRate",
 		"/grain/srcCembalo",
 		"/grain/srcGuitar",
+		"/grain/srcPad",
 		"/grain/srcTape",
 		"/grain/timeStretch",
 		"/grain/xy/1",
@@ -160,10 +209,29 @@
 		"/grain/xy/3",
 		"/grain/xy/4",
 		"/grain/xy/5",
+		"/grain/xyHold",
+		"/grain/xyMap/bow",
+		"/grain/xyMap/classic",
+		"/grain/xyMap/harp",
+		"/grain/xyMap/pulse",
 		"/grain/xyMode",
 		"/master/volume",
+		"/pad/age",
+		"/pad/attack",
+		"/pad/detune",
+		"/pad/release",
+		"/pad/reverb",
+		"/pad/tone",
+		"/pad/volume",
+		"/pad/wave",
+		"/pad/wobble",
+		"/pad/wobbleRate",
 		"/pager1",
 		"/preset/deleteArm",
+		"/preset/sample/0",
+		"/preset/sample/1",
+		"/preset/sample/2",
+		"/preset/sample/3",
 		"/preset/saveArm",
 		"/preset/tap/0",
 		"/preset/tap/1",
@@ -181,12 +249,15 @@
 		"/preset/tap/7",
 		"/preset/tap/8",
 		"/preset/tap/9",
+		"/record/disk",
 		"/status/heartbeat",
 		"/synth/cembalo/enable",
 		"/synth/grain/enable",
+		"/synth/pad/enable",
 		"/synth/tape/enable",
 		"/tape/badness",
 		"/tape/badnessmap",
+		"/tape/pluck",
 		"/tape/reverbMix",
 		"/tape/reverbRoom",
 		"/tape/volume",
@@ -199,6 +270,7 @@
 		"/cembalo/decay",
 		"/cembalo/noise",
 		"/cembalo/octave",
+		"/cembalo/pluck",
 		"/cembalo/revMix",
 		"/cembalo/room",
 		"/cembalo/volume",
@@ -212,16 +284,28 @@
 		"/grain/density",
 		"/grain/duration",
 		"/grain/feedback",
-		"/grain/fftFilter",
+		"/grain/fftBlur",
+		"/grain/fftFlicker",
 		"/grain/fftFreeze",
 		"/grain/fftFreezeVol",
-		"/grain/fftMorph",
+		"/grain/fftPad",
+		"/grain/fftPad-label",
+		"/grain/fftSieve",
+		"/grain/fftSmear",
+		"/grain/fftSource",
+		"/grain/fftSource-label",
+		"/grain/fftTilt",
+		"/grain/fftTilt-label",
+		"/grain/fftTime",
+		"/grain/fftTime-label",
+		"/grain/fftWarp",
+		"/grain/fftWarp-label",
 		"/grain/filterFreq",
 		"/grain/fixedPos",
 		"/grain/freqModAmt",
 		"/grain/freqModFreq",
 		"/grain/jitter",
-		"/grain/loadSample",
+		"/grain/liveMode",
 		"/grain/octaveDown",
 		"/grain/octaveUp",
 		"/grain/panRand",
@@ -232,11 +316,11 @@
 		"/grain/randDetune",
 		"/grain/randomOctave",
 		"/grain/recStatus",
-		"/grain/record",
 		"/grain/speedModDepth",
 		"/grain/speedModRate",
 		"/grain/srcCembalo",
 		"/grain/srcGuitar",
+		"/grain/srcPad",
 		"/grain/srcTape",
 		"/grain/timeStretch",
 		"/grain/timeStretch-label",
@@ -245,8 +329,24 @@
 		"/grain/xy/3",
 		"/grain/xy/4",
 		"/grain/xy/5",
+		"/grain/xyHint",
+		"/grain/xyHold",
+		"/grain/xyMap/bow",
+		"/grain/xyMap/classic",
+		"/grain/xyMap/harp",
+		"/grain/xyMap/pulse",
 		"/grain/xyMode",
 		"/master/volume",
+		"/pad/age",
+		"/pad/attack",
+		"/pad/detune",
+		"/pad/release",
+		"/pad/reverb",
+		"/pad/tone",
+		"/pad/volume",
+		"/pad/wave",
+		"/pad/wobble",
+		"/pad/wobbleRate",
 		"/pager1",
 		"/preset/deleteArm",
 		"/preset/label/0",
@@ -266,6 +366,14 @@
 		"/preset/label/8",
 		"/preset/label/9",
 		"/preset/name",
+		"/preset/sample/0",
+		"/preset/sample/1",
+		"/preset/sample/2",
+		"/preset/sample/3",
+		"/preset/sampleLabel/0",
+		"/preset/sampleLabel/1",
+		"/preset/sampleLabel/2",
+		"/preset/sampleLabel/3",
 		"/preset/saveArm",
 		"/preset/status",
 		"/preset/tap/0",
@@ -284,12 +392,16 @@
 		"/preset/tap/7",
 		"/preset/tap/8",
 		"/preset/tap/9",
+		"/record/disk",
+		"/record/status",
 		"/status/heartbeat",
 		"/synth/cembalo/enable",
 		"/synth/grain/enable",
+		"/synth/pad/enable",
 		"/synth/tape/enable",
 		"/tape/badness",
 		"/tape/badnessmap",
+		"/tape/pluck",
 		"/tape/reverbMix",
 		"/tape/reverbRoom",
 		"/tape/volume",
