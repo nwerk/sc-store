@@ -57,7 +57,7 @@ Same machine, same benchmark (six voices sounding), mean per frame:
 | machine | Python | native |
 |---|---|---|
 | laptop (i9-13900H, performance core, on battery) | 2.8 ms | 0.59 ms |
-| Raspberry Pi 4 | 7.1 ms | not measured yet: run `bench` |
+| Raspberry Pi 4 (32-bit OS) | 7.1 ms | 11.3 ms with the vector code compiled as scalar (see below); with NEON: not measured yet |
 
 The laptop numbers were taken on battery in its power-saving profile (the core runs at well under 1 GHz then), so
 they compare Python and native on one machine and say little about another one.
@@ -80,6 +80,19 @@ Where the time goes now, and what was done about it:
 A live run costs more per frame than `bench`, which runs frames back to back: between two frames the thread sleeps,
 and a CPU that scales its clock with the load slows down meanwhile (laptop: 17 % live against 12 % in `bench` at
 hop 256). On the Pi, `run-sc-main_multi.sh` therefore sets the `performance` governor.
+
+## 32-bit ARM (Raspberry Pi OS / Patchbox OS armhf)
+
+GCC turns float vector arithmetic into NEON instructions on 32-bit ARM only with `-funsafe-math-optimizations`
+(ARMv7 NEON flushes denormals to zero, which is not IEEE). Without it, every vector operation of the network and
+the FFT is split into scalar ones with lane shuffles: the first Pi 4 measurement was 11.3 ms per frame, slower
+than numpy. The Makefile therefore compiles `model.cpp` and `frontend.cpp` with that flag on `armv7l`/`armv8l`
+(not the decoder, whose note decisions stay in plain IEEE arithmetic) and adds `-Wvector-operation-performance`,
+so any vector code that is still split up shows as a warning during `make`.
+
+`bench` and `run` print what the binary was built for, e.g. `native (C++, ARMv7 NEON)`; a build that would be
+slow says so there. On x86 the same flag changes only rounding: `compare.py` still matches (features within
+7e-5, probabilities within 3e-6).
 
 ## Realtime priority
 

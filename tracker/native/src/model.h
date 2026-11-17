@@ -10,6 +10,10 @@ namespace pt {
 
 constexpr int REF_RATE = 48000;
 
+// The vector instructions this binary was built for, e.g. "AArch64 NEON" (printed by `bench` and `run`), with a
+// warning appended if the vector code was compiled to scalar operations.
+const char* simd_info();
+
 // Python's round(): halfway cases to even (std::nearbyint in the default rounding mode)
 inline long pyround(double x) { return static_cast<long>(std::nearbyint(x)); }
 

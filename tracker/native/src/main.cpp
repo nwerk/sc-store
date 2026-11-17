@@ -464,8 +464,8 @@ public:
         if (ctl_) ctl_->start();
         src_.start();
         if (out_) out_->hello(tr_.net.name);
-        std::printf("[polytracker] running: %d Hz, hop %d (%.1f ms), history %d, voices %d\n", sr, hop,
-                    1000.0 * hop / sr, H, tr_.dec.p.max_voices);
+        std::printf("[polytracker] running: %d Hz, hop %d (%.1f ms), history %d, voices %d, native (%s)\n", sr, hop,
+                    1000.0 * hop / sr, H, tr_.dec.p.max_voices, simd_info());
         std::fflush(stdout);
 
         while (!g_stop && !quit && !src_.shutdown) {
@@ -645,7 +645,7 @@ int cmd_bench(const Args& a) {
     std::vector<int> hops;
     if (a.has("--hop")) hops.push_back(std::stoi(a.str("--hop", "256")));
     else hops = {256, 512};
-    std::printf("native (C++)\n");
+    std::printf("native (C++, %s)\n", simd_info());
     for (int hop : hops) {
         Tracker tr(net, params, sr, hop);
         std::printf("%s\n", summary(tr, stats(measure(tr, seconds))).c_str());

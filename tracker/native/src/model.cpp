@@ -76,6 +76,26 @@ void conv_rows(const float* w, const float* b, Rows x, float* out, int rows, int
 
 }  // namespace
 
+const char* simd_info() {
+#if defined(__AVX2__) && defined(__FMA__)
+    return "x86-64 AVX2 + FMA";
+#elif defined(__AVX__)
+    return "x86-64 AVX";
+#elif defined(__x86_64__)
+    return "x86-64 SSE";
+#elif defined(__aarch64__)
+    return "AArch64 NEON";
+#elif defined(__arm__) && defined(__ARM_NEON) && defined(PT_ARM32_NEON_FLOAT)
+    return "ARMv7 NEON";
+#elif defined(__arm__) && defined(__ARM_NEON)
+    return "ARMv7, vector code compiled as scalar (built without -funsafe-math-optimizations, see Makefile): SLOW";
+#elif defined(__arm__)
+    return "ARMv7 without NEON (see CPUFLAGS in the Makefile): SLOW";
+#else
+    return "no known vector instructions";
+#endif
+}
+
 PitchNet PitchNet::load(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open model " + path);

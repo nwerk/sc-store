@@ -43,10 +43,18 @@ void power(const float* re, const float* im, float* out, int n) {
 // Dot product with eight partial sums (one running sum is a chain of dependent additions; the wide filters of the
 // high grid bins have up to a few hundred taps).
 float dot(const float* a, const float* b, int n) {
-    simd::v8 acc = {0, 0, 0, 0, 0, 0, 0, 0};
+    // two accumulators of the widest native vector: 8 partial sums with SSE / NEON, 16 with AVX
+    using V = simd::vn;
+    constexpr int W = int(sizeof(V) / sizeof(float));
+    V acc0 = V{}, acc1 = V{};
     int i = 0;
-    for (; i + 8 <= n; i += 8) acc += simd::load<simd::v8>(a + i) * simd::load<simd::v8>(b + i);
-    float s = ((acc[0] + acc[4]) + (acc[1] + acc[5])) + ((acc[2] + acc[6]) + (acc[3] + acc[7]));
+    for (; i + 2 * W <= n; i += 2 * W) {
+        acc0 += simd::load<V>(a + i) * simd::load<V>(b + i);
+        acc1 += simd::load<V>(a + i + W) * simd::load<V>(b + i + W);
+    }
+    const V acc = acc0 + acc1;
+    float s = 0.0f;
+    for (int k = 0; k < W; ++k) s += acc[k];
     for (; i < n; ++i) s += a[i] * b[i];
     return s;
 }
