@@ -1,7 +1,8 @@
 // ============================================================
 // OSC Address → CC Bus Index Mapping (Multi-Synth Patch)
 // ============================================================
-// Covers grain (indices 11–83), tape (remapped to 90–97), cembalo (100–109) and the FFT effect (110–119).
+// Covers grain (indices 11–83), the pad (67–76), tape (remapped to 90–97), cembalo (100–109) and the FFT
+// effect (110–119).
 //
 // Tape params use their ORIGINAL key names (badness, wavemix, etc.)
 // pointing to new indices 90–96. This causes the \ape SynthDef to
@@ -94,6 +95,19 @@
 	fftFlicker:  ( index: 117 ),
 	fftBlur:     ( index: 118 ),
 	fftTilt:     ( index: 119 ),  // 0.5 = open
+
+	// ---- Pad params (free zone 67–76; 110–119 is the FFT effect's) ----
+	// \pad (synths/pad.scd) reads these slots directly; the indices are baked in at compile time.
+	pad_volume:       ( index: 67 ),
+	pad_wobble:       ( index: 68 ),  // depth of the pitch modulation (wow, flutter, scoop)
+	pad_wobbleRate:   ( index: 69 ),
+	pad_detune:       ( index: 70 ),
+	pad_tone:         ( index: 71 ),
+	pad_wave:         ( index: 72 ),
+	pad_age:          ( index: 73 ),
+	pad_attack:       ( index: 74 ),
+	pad_release:      ( index: 75 ),
+	pad_reverb:       ( index: 76 ),
 );
 
 // ---- ~oscMap: OSC address string → (busIndex, type) ----
@@ -182,10 +196,23 @@
 	'/cembalo/room':       ( busIndex: 108, type: \fader, label: "Cembalo Reverb Room" ),
 	'/cembalo/pluck':      ( busIndex: 109, type: \fader, label: "Cembalo Picking Position Amount" ),
 
+	// ---- Pad faders (free zone 67–76; \pad reads the slots, generic fader handler) ----
+	'/pad/volume':         ( busIndex: 67, type: \fader, label: "Pad Volume" ),
+	'/pad/wobble':         ( busIndex: 68, type: \fader, label: "Pad Pitch Wobble Depth" ),
+	'/pad/wobbleRate':     ( busIndex: 69, type: \fader, label: "Pad Pitch Wobble Rate" ),
+	'/pad/detune':         ( busIndex: 70, type: \fader, label: "Pad Detune" ),
+	'/pad/tone':           ( busIndex: 71, type: \fader, label: "Pad Tone (lowpass)" ),
+	'/pad/wave':           ( busIndex: 72, type: \fader, label: "Pad Wave (saws .. pulse)" ),
+	'/pad/age':            ( busIndex: 73, type: \fader, label: "Pad Tape Age" ),
+	'/pad/attack':         ( busIndex: 74, type: \fader, label: "Pad Attack" ),
+	'/pad/release':        ( busIndex: 75, type: \fader, label: "Pad Release" ),
+	'/pad/reverb':         ( busIndex: 76, type: \fader, label: "Pad Reverb Mix" ),
+
 	// ---- Grain input sources (toggles, any combination) ----
 	'/grain/srcGuitar':    ( type: \toggle,   label: "Grain In: Guitar" ),
 	'/grain/srcCembalo':   ( type: \toggle,   label: "Grain In: Cembalo" ),
 	'/grain/srcTape':      ( type: \toggle,   label: "Grain In: Tape Synth" ),
+	'/grain/srcPad':       ( type: \toggle,   label: "Grain In: Pad" ),
 );
 
 // ---- FFT effect: pad slots and starting values ----

@@ -4,7 +4,7 @@
 // Requires: ~oscMap, ~busToOsc        (osc_mappings_multi.scd)
 //           ~ccBuses, ~busNames       (midiconfig_multi.scd)
 //           ~rec, ~g, ~ptr, b        (main_multi.scd)
-//           ~grainMaster, ~tapeMaster, ~cembaloMaster (main_multi.scd)
+//           ~grainMaster, ~tapeMaster, ~cembaloMaster, ~padMaster (main_multi.scd)
 //           ~synthEnabled, ~grainSrc, ~focusedSynth, ~updateChains,
 //           ~setCembaloParam, ~cembaloSpecs (main_multi.scd)
 //           ~xyTouch, ~setXYMap, ~setXYHold, ~xyMaps, ~xyMapOrder (main_multi.scd)
@@ -77,13 +77,13 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 // ---- Synth focus feedback ----
 // Sends /synth/<name>/focused back to TouchOSC.
 ~sendFocusFeedback = {
-	[\grain, \tape, \cembalo].do { |name|
+	[\grain, \tape, \cembalo, \pad].do { |name|
 		~sendToTouchOSC.("/synth/" ++ name ++ "/focused", (~focusedSynth == name).asInteger.asFloat);
 	};
 };
 
 // Grain input source toggles: ~grainSrc key → OSC address
-~grainSrcAddr = ( guitar: "/grain/srcGuitar", cembalo: "/grain/srcCembalo", tape: "/grain/srcTape" );
+~grainSrcAddr = ( guitar: "/grain/srcGuitar", cembalo: "/grain/srcCembalo", tape: "/grain/srcTape", pad: "/grain/srcPad" );
 ~sendGrainSrcFeedback = {
 	~grainSrcAddr.keysValuesDo { |name, addr|
 		~sendToTouchOSC.(addr, ~grainSrc[name].asInteger.asFloat);
@@ -185,6 +185,7 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~sendToTouchOSC.('/synth/grain/enable', ~synthEnabled[\grain].asInteger.asFloat);
 	~sendToTouchOSC.('/synth/tape/enable',  ~synthEnabled[\tape].asInteger.asFloat);
 	~sendToTouchOSC.('/synth/cembalo/enable', ~synthEnabled[\cembalo].asInteger.asFloat);
+	~sendToTouchOSC.('/synth/pad/enable',  ~synthEnabled[\pad].asInteger.asFloat);
 	~sendFocusFeedback.();
 	~sendGrainSrcFeedback.();
 
@@ -222,9 +223,9 @@ OSCdef('/grain/fftPad', { |msg|
 	OSCdef(addr.asSymbol, { |msg| ~setCembaloParam.(key, msg[1]) }, addr);
 };
 
-// ---- Grain input sources: guitar / cembalo / tape synth, any combination ----
+// ---- Grain input sources: guitar / cembalo / tape synth / pad, any combination ----
 // Latching buttons in TouchOSC: the value is the new state. A source that is not audible on its own
-// (cembalo / tape enable off) is started anyway while it feeds the grains.
+// (cembalo / tape / pad enable off) is started anyway while it feeds the grains.
 ~grainSrcAddr.keysValuesDo { |name, addr|
 	OSCdef(addr.asSymbol, { |msg|
 		var on = msg[1] >= 0.5;
@@ -474,7 +475,7 @@ OSCdef('/record/disk', { |msg|
 }, "/record/disk");
 
 // ---- Synth enable/disable ----
-// ~setSynthEnabled.(\grain | \tape | \cembalo, bool, focus)
+// ~setSynthEnabled.(\grain | \tape | \cembalo | \pad, bool, focus)
 // Used by the tablet buttons and the footswitch (midiconfig_multi.scd). focus: also point the expression pedal
 // at this synth when it is switched on (the tablet does that; the footswitch does not).
 ~setSynthEnabled = { |name, on, focus = true|
@@ -494,7 +495,7 @@ OSCdef('/record/disk', { |msg|
 			// ~mic / ~ptr / ~rec kept running so the buffer stays current
 		};
 	} {
-		// tape / cembalo: starts / fades in, or fades out and pauses (unless it still feeds the grains)
+		// tape / cembalo / pad: starts / fades in, or fades out and pauses (unless it still feeds the grains)
 		~updateChains.();
 	};
 	if (on and: { focus }) {
@@ -505,7 +506,7 @@ OSCdef('/record/disk', { |msg|
 	(name.asString ++ ": " ++ if(on, "ENABLED", "DISABLED")).postln;
 };
 
-[\grain, \tape, \cembalo].do { |name|
+[\grain, \tape, \cembalo, \pad].do { |name|
 	var addr = "/synth/" ++ name ++ "/enable";
 	OSCdef(addr.asSymbol, { |msg| ~setSynthEnabled.(name, msg[1] >= 0.5) }, addr);
 };
@@ -513,7 +514,7 @@ OSCdef('/record/disk', { |msg|
 // ---- Synth focus (MIDI expression pedal routing) ----
 OSCdef('/synth/focus', { |msg|
 	var name = msg[1].asSymbol;
-	if (#[\grain, \tape, \cembalo].includes(name)) {
+	if (#[\grain, \tape, \cembalo, \pad].includes(name)) {
 		~focusedSynth = name;
 		~sendFocusFeedback.();
 		("Focused synth: " ++ name).postln;

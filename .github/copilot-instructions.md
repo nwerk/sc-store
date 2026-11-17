@@ -37,6 +37,7 @@ sc-store/
 │   ├── midiconfig.scd    # MIDI device init + CC bus management
 │   └── mappings/         # Per-patch MIDI CC parameter mappings
 ├── synths/               # SynthDef definitions
+│   ├── pad.scd           # \pad: wobbly tape pad, played by the pitch tracker
 │   ├── bouncing_ball.scd # Physical-modeling bouncing ball synth
 │   ├── scramble.scd      # FFT bin scramble effect
 │   ├── fft_prism.scd     # Spectral feedback effect after the grains (main_multi.scd; core UGens only)
