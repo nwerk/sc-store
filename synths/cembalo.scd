@@ -22,7 +22,10 @@
 //   pluckRef / pluckTrack / pluckSpan  calibration of the position, see classes/pluckpos.scd
 // Output stage (\cembaloOut, one instance): volume, revMix, room.
 //
-// CPU: a note is two synths in one group. \cembalo is the string (strings, body, rattle); \cembaloAttack is
+// Attack (opts attack:): \onset (default) = the pick scrape, squeak and thump start from the pick in the guitar
+// signal, without waiting for the tracker (see \cembaloAttacks); \note = they start with each note-on, as before.
+//
+// CPU: a note is two synths in one group (attack: \note; with \onset only the string). \cembalo is the string (strings, body, rattle); \cembaloAttack is
 // everything that is over after 150 ms (pick scrape, squeak, key thump) and frees itself then, instead of
 // computing silence for the rest of the note. Both go through the same lowpass, envelope and panning, so their sum
 // is the same signal as one synth computing all of it (a lowpass of a sum is the sum of the lowpasses).
@@ -44,8 +47,11 @@ SynthDef(\cembaloVel, { |in=0, out=0|
 // velocity: peak input level over the first 8 ms (the tracker can fire just before the attack's peak), then held.
 // position: -1 (neck) .. +1 (bridge), taken at that peak (so it is the pick's brightness, not the brightness of
 // what was ringing before), scaled by the pluck amount: 0 when pluck is 0.
-~cembaloTouch = { |velBus, freq, velDbLo, velDbHi, velCurve, pluck, pluckRef, pluckTrack, pluckSpan|
-	var in = In.kr(velBus, 2), open = Line.kr(1, -1, 0.008), peak = RunningMax.kr(in[0]);
+// trig (optional): measure again from every trigger instead of once from the start of the synth (\cembaloAttacks)
+~cembaloTouch = { |velBus, freq, velDbLo, velDbHi, velCurve, pluck, pluckRef, pluckTrack, pluckSpan, trig|
+	var in = In.kr(velBus, 2);
+	var open = if(trig.isNil) { Line.kr(1, -1, 0.008) } { Trig1.kr(trig, 0.008) * 2 - 1 };
+	var peak = RunningMax.kr(in[0], trig ? 0);
 	var vel = Gate.kr(peak, open).linlin(velDbLo, velDbHi, 0, 1) ** velCurve;
 	var pos = Gate.kr(~pluckPosition.(in[1], freq, pluckRef, pluckTrack, pluckSpan), open * (in[0] >= peak));
 	[vel, pos * pluck]
@@ -138,6 +144,62 @@ SynthDef(\cembaloAttack, { |out=0, freq=220, velBus=0, amp=0.5, decay=3.0, brigh
 	Out.ar(out, Balance2.ar(sig[0], sig[1], pan));
 }).add;
 
+// ---- Attacks from the pick itself (attack: \onset, the default) ----
+// The pick scrape, squeak and key thump of every pluck, started by the pick in the guitar signal instead of by the
+// tracker's note-on: the tracker needs about 6 ms (median) and up to 30 ms (strummed chords) to name the notes, the
+// pick is seen here within a fraction of a millisecond. The ear times a note by its attack, so the cembalo then
+// answers at once; the strings (\cembalo) follow when the tracker knows the pitches.
+// One persistent synth for all plucks (it runs, and is paused, with the cembalo group); every pick restarts it.
+//
+// Pick detector, entirely in scsynth, no FFT (no window to wait for): the guitar above 1.5 kHz, where the pick's
+// noise is and sustained notes die away fast; its level (0.5 ms attack) must jump onsetRise dB above the level
+// 5 ms earlier AND onsetAbove dB above a slow follower of itself, and be above onsetFloor dBFS; then 50 ms of
+// rest. Measured on a synthetic test performance (single notes ppp..fff, strums, a 140 bpm 16th run, hammer-ons,
+// a ringing vibrato chord): 54 of 59 picks found, 0.1 ms after the pick (90th percentile), no false triggers
+// (hammer-ons and vibrato do not fire; slow strums fire again for their later strings). Misses: soft notes right
+// after louder ones in fast runs. For those the tracker's note-on fires the attack (t_note), unless a pick was
+// seen in the noteWindow seconds before it.
+// Not per note any more: no pitch (the picking position is read as for a 220 Hz note) and a small random pan.
+SynthDef(\cembaloAttacks, { |out=0, in=0, velBus=0, amp=0.5, noise=0.7, warmth=0.5, weird=0.5,
+	velDbLo= -50, velDbHi= -12, velCurve=1.2, velRange=30, pluck=0, pluckRef=800, pluckTrack=0.5, pluckSpan=0.75,
+	onsetRise=6, onsetAbove=6, onsetFloor= -60, t_note=0, noteWindow=0.08|
+	var hp, fast, onset, late, trig, trigK, vel, pos, velAmp, nz, sweep, scrape, squeak, thump, sig;
+
+	hp = HPF.ar(HPF.ar(In.ar(in), 1500), 1500);
+	fast = Amplitude.ar(hp, 0.0005, 0.005);
+	onset = Trig1.ar((fast > (DelayN.ar(fast, 0.01, 0.005) * onsetRise.dbamp))
+		* (fast > (LagUD.ar(fast, 0.02, 0.03) * onsetAbove.dbamp))
+		* (fast > onsetFloor.dbamp), 0.05);
+	// a note-on with no pick shortly before it (a pick the detector missed)
+	late = T2A.ar(t_note) * (Sweep.ar(onset) > noteWindow);
+	trig = onset + late;                        // audio rate: the envelopes start on the sample
+	trigK = A2K.kr(Trig1.ar(trig, 0.003));      // control rate (held longer than one block): randomness, velocity
+
+	// velocity and picking position as in ~cembaloTouch, measured from this pick on
+	# vel, pos = ~cembaloTouch.(velBus, 220, velDbLo, velDbHi, velCurve, pluck, pluckRef, pluckTrack, pluckSpan,
+		trigK);
+	velAmp = ((vel - 1) * velRange).dbamp;
+
+	// This synth runs all the time, so it shares one pair of noise sources between scrape and squeak (two pink noise
+	// generators were a third of its cost). Through the squeak's narrow band pass, pink noise is white noise at
+	// 0.34 * sqrt(1000 Hz / f) of its level (measured, within 0.4 dB from 600 to 4200 Hz).
+	nz = [WhiteNoise.ar, WhiteNoise.ar];
+	// pick scrape: a short hiss, louder when hit harder and when picked near the bridge
+	scrape = BPF.ar(nz, TRand.kr(1800, 4200, trigK), 0.7)
+		* EnvGen.ar(Env.perc(0.001, TRand.kr(0.06, 0.14, trigK), 1, -6), trig) * (0.25 + vel) * 1.25 * (2 ** pos);
+	// squeak: a wound-string chirp on some plucks (more often the weirder it is)
+	sweep = EnvGen.kr(Env([TRand.kr(2400, 4200, trigK), TRand.kr(600, 1300, trigK)], [TRand.kr(0.05, 0.12, trigK)],
+		\exp), trigK);
+	squeak = BPF.ar(nz, sweep, 0.07) * (0.34 * (1000 / sweep).sqrt)
+		* EnvGen.ar(Env.perc(0.004, 0.1), trig) * 6 * weird * (TRand.kr(0, 1, trigK) < (0.25 + (0.5 * weird)));
+	// key thump: the jack hitting the felt
+	thump = SinOsc.ar(TRand.kr(65, 110, trigK)) * EnvGen.ar(Env.perc(0.001, 0.045), trig) * 0.35 * vel;
+	sig = (scrape + squeak + thump) * noise;
+	sig = LPF.ar(sig, warmth.linexp(0, 1, 14000, 3200));
+	sig = sig * velAmp * amp;
+	Out.ar(out, Balance2.ar(sig[0], sig[1], TRand.kr(-0.2, 0.2, trigK)));
+}).add;
+
 SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	var sig = In.ar(in, 2);
 	sig = FreeVerb2.ar(sig[0], sig[1], revMix, room, 0.6);
@@ -154,7 +216,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 //   .quit           remove everything (not .free: Object:free would silently do nothing)
 ~cembaloNew = { |server, tracker, opts|
 	var c = Environment.new(know: true);
-	var o = (inBus: 0, out: 0, target: nil, maxVoices: 12, volume: 1.0, enabled: false);
+	var o = (inBus: 0, out: 0, target: nil, maxVoices: 12, volume: 1.0, enabled: false, attack: \onset);
 	var prevOnNoteOn;
 	opts !? { opts.keysValuesDo { |k, v| o[k] = v } };
 
@@ -162,7 +224,8 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	c[\enabled] = false;
 	c[\params] = (amp: 0.5, decay: 3.0, bright: 0.5, noise: 0.7, warmth: 0.5, weird: 0.5, octave: 0.25,
 		velDbLo: -50, velDbHi: -12, velCurve: 1.2, velRange: 30,
-		pluck: 0, pluckRef: 800, pluckTrack: 0.5, pluckSpan: 0.75);
+		pluck: 0, pluckRef: 800, pluckTrack: 0.5, pluckSpan: 0.75,
+		onsetRise: 6, onsetAbove: 6, onsetFloor: -60, noteWindow: 0.08);  // pick detector (attack: \onset)
 	c[\monitoring] = false;
 	c[\outParams] = (volume: o[\volume], revMix: 0.22, room: 0.55);
 	c[\voices] = List.new;          // oldest first
@@ -173,29 +236,47 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	c[\group] = Group(o[\target] ? server.defaultGroup, \addToTail);
 	c[\voiceGroup] = Group(c[\group], \addToHead);
 	c[\velSynth] = Synth(\cembaloVel, [\in, o[\inBus], \out, c[\velBus]], c[\group], \addToHead);
+	if(o[\attack] == \onset) {  // after \cembaloVel, whose bus it reads in the same block
+		c[\attackSynth] = Synth(\cembaloAttacks, [\out, c[\outBus], \in, o[\inBus], \velBus, c[\velBus]]
+			++ c[\params].asKeyValuePairs, c[\velSynth], \addAfter);
+	};
 	c[\outSynth] = Synth(\cembaloOut, [\in, c[\outBus], \out, o[\out], \amp, 0,
 		\revMix, c[\outParams][\revMix], \room, c[\outParams][\room]], c[\group], \addToTail);
+
+	// Damp a voice. It may have ended on the server a moment ago (rung out, see DetectSilence above) while its
+	// /n_end is still on the way to sclang; ['/error', -1] silences the "Node not found" of this one message only.
+	c[\choke] = { |self, voice|
+		server.sendBundle(nil, ['/error', -1], voice.setMsg(\gate, 0));
+	};
 
 	c[\noteOn] = { |self, midi, freq|
 		var syn, old, args;
 		if(self[\enabled]) {
 			// re-plucking a sounding pitch damps the old string; too many voices: damp the oldest
 			old = self[\byMidi][midi];
-			old !? { old.set(\gate, 0); self[\voices].remove(old) };
+			old !? { self.choke(old); self[\voices].remove(old) };
 			while { self[\voices].size >= self[\opts][\maxVoices] } {
-				self[\voices].removeAt(0).set(\gate, 0);  // its byMidi entry is cleared when it frees
+				self.choke(self[\voices].removeAt(0));  // its byMidi entry is cleared when it frees
 			};
-			// a voice is a group holding the string and its attack (see the top of this file); one bundle, so
-			// both start in the same control block
+			// a voice is a group holding the string and (attack: \note) its attack (see the top of this file); one
+			// bundle, so both start in the same control block. attack: \onset: the attack has usually started
+			// already, from the pick; t_note starts it now if the pick was missed.
 			args = [
 				\out, self[\outBus], \freq, freq, \velBus, self[\velBus],
 				\pan, (midi.linlin(40, 84, -0.45, 0.45) + 0.15.rand2)
 			] ++ self[\params].asKeyValuePairs;
 			syn = Group.basicNew(server);
-			server.sendBundle(nil,
-				syn.newMsg(self[\voiceGroup], \addToHead),
-				Synth.basicNew(\cembalo, server).newMsg(syn, args),
-				Synth.basicNew(\cembaloAttack, server).newMsg(syn, args));
+			if(self[\attackSynth].notNil) {
+				server.sendBundle(nil,
+					syn.newMsg(self[\voiceGroup], \addToHead),
+					Synth.basicNew(\cembalo, server).newMsg(syn, args),
+					self[\attackSynth].setMsg(\t_note, 1));
+			} {
+				server.sendBundle(nil,
+					syn.newMsg(self[\voiceGroup], \addToHead),
+					Synth.basicNew(\cembalo, server).newMsg(syn, args),
+					Synth.basicNew(\cembaloAttack, server).newMsg(syn, args));
+			};
 			syn.onFree {
 				self[\voices].remove(syn);
 				if(self[\byMidi][midi] === syn) { self[\byMidi].removeAt(midi) };
@@ -234,6 +315,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 		} {
 			if(self[\params].includesKey(key)) {
 				self[\params][key] = val;
+				self[\attackSynth] !? { |a| a.set(key, val) };  // the attacks follow at once, the strings from the next note
 			} {
 				("cembalo: unknown parameter %; known: %".format(key,
 					(self[\params].keys ++ self[\outParams].keys).asArray.sort)).warn;
@@ -249,7 +331,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 			self[\outSynth].set(\amp, self[\outParams][\volume]);
 		} {
 			self[\outSynth].set(\amp, 0);
-			self[\voices].copy.do { |v| v.set(\gate, 0) };
+			self[\voices].copy.do { |v| self.choke(v) };
 			// pause the whole chain once faded (no CPU while off)
 			AppClock.sched(0.25, { if(self[\enabled].not) { self[\group].run(false) }; nil });
 		};

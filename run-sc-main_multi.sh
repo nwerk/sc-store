@@ -39,9 +39,13 @@ if [[ "$ON_PI" -eq 1 ]]; then
 else
     : "${TOUCHOSC_IP:=192.168.0.110}"   # tablet on the home network
     : "${JACK_DEVICE:=}"                # ALSA device, e.g. hw:USB; empty = Focusrite if connected, else hw:0
+    # 128 samples = 2.7 ms per period, about 5 ms less from guitar to speaker than 256. The laptop has the CPU for it;
+    # if it crackles (xruns in the PERF_LOG=1 lines), go back with JACK_PERIOD=256 ./run-sc-main_multi.sh
+    : "${JACK_PERIOD:=128}"
 fi
 : "${JACK_RATE:=48000}"                 # must match s.options.sampleRate in config/serversetup.scd
-: "${JACK_PERIOD:=256}"
+: "${JACK_PERIOD:=256}"                 # Pi: 256 samples = 5.3 ms per period (must be a multiple of scsynth's
+                                        # blockSize, 64, config/serversetup.scd)
 : "${JACK_NPERIODS:=2}"
 : "${UI_HTTP_PORT:=8080}"               # serves ui/main.tosc to the tablet; 0 = off
 if [[ "$ON_PI" -eq 1 ]]; then
@@ -333,7 +337,8 @@ if [[ "$ON_PI" -eq 1 ]]; then
 else
     # JACK_NO_START_SERVER: only ask, never let jack_lsp start a default server
     if JACK_NO_START_SERVER=1 jack_lsp &>/dev/null; then
-        echo "JACK is already running, using it."
+        # its settings are not changed: a JACK started elsewhere keeps its own period (JACK_PERIOD does not apply)
+        echo "JACK is already running, using it$(command -v jack_bufsize >/dev/null && JACK_NO_START_SERVER=1 jack_bufsize 2>/dev/null | grep -o '[0-9]\+' | head -n 1 | sed 's/^/ (period: /; s/$/ samples)/')."
     else
         if [[ -z "$JACK_DEVICE" ]]; then
             SCARLETT_CARD=$(focusrite_card)

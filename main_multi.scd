@@ -49,14 +49,21 @@ SynthDef(\grainSource, { |out=0, guitarIn=0, cembaloIn=0, tapeIn=0, padIn=0, gui
 
 // ---- Output safety stage (last node on the server) ----
 // Whatever happens upstream (grain overlaps adding up, a synth blowing up, NaN / inf), the hardware outputs never
-// get more than `ceiling` (≈ -0.5 dBFS): bad values become silence, DC is removed, peaks are limited.
-// Everything you hear passes through here, so the limiter's delay is latency of the whole instrument: it delays by
-// twice its look-ahead (measured), 2 ms look-ahead = 4 ms. It was 5 ms = 10 ms; a longer look-ahead limits more
-// smoothly (less distortion on bass while it is limiting), a shorter one answers faster to the guitar.
-SynthDef(\outputSafety, { |ceiling=0.95|
-	var sig = Sanitize.ar(In.ar(0, 2));
+// get more than `ceiling` (≈ -0.5 dBFS): bad values become silence, DC is removed, peaks are held down.
+// Everything you hear passes through here, so it has no look-ahead and adds no delay (a look-ahead limiter
+// delays everything by twice its look-ahead: 4 ms with the 2 ms it had last). Instead:
+//   - a fast compressor, both channels linked: above -3 dBFS (thresh) at 10:1, 0.5 ms attack, 0.5 s release;
+//   - a soft clipper behind it for what gets through during the attack: linear up to 0.8 * ceiling, then a tanh
+//     curve that reaches the ceiling only asymptotically; finally a hard clip at +-1 as the last resort.
+// Below -3 dBFS the signal passes unchanged (bit for bit). Measured offline against the 2 ms limiter: 0 samples
+// delay instead of 194; a 0 dBFS tone gets harmonics 97 dB below it, a bass tone 6 dB over full scale 51 dB below
+// it (the limiter: 54 dB); noise bursts at +3.5 dBFS stay at the ceiling.
+SynthDef(\outputSafety, { |ceiling=0.95, thresh=0.7|
+	var sig = Sanitize.ar(In.ar(0, 2)), k, room, a;
 	sig = LeakDC.ar(sig);
-	sig = Limiter.ar(sig, ceiling, 0.002);
+	sig = Compander.ar(sig, max(sig[0].abs, sig[1].abs), thresh, 1, 0.1, 0.0005, 0.5);
+	k = ceiling * 0.8; room = ceiling - k; a = sig.abs;
+	sig = sig.sign * (a.min(k) + (room * tanh((a - k).max(0) / room)));
 	ReplaceOut.ar(0, Sanitize.ar(sig).clip(-1, 1));
 }).add;
 
