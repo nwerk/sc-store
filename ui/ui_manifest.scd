@@ -44,7 +44,7 @@
 //   /grain/freqModAmt FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/freqModFreq FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/jitter FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
-//   /grain/loadSample BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /grain/liveMode BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/octaveDown BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/octaveUp BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/panRand FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -55,7 +55,6 @@
 //   /grain/randDetune FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/randomOctave FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/recStatus LABEL button=- send=1 receive=1 args=VALUE:STRING:text:0:1
-//   /grain/record BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/speedModDepth FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/speedModRate FADER button=- send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /grain/srcCembalo BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -106,6 +105,14 @@
 //   /preset/label/8 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/label/9 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/name LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sample/0 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sample/1 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sample/2 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sample/3 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /preset/sampleLabel/0 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sampleLabel/1 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sampleLabel/2 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
+//   /preset/sampleLabel/3 LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/saveArm BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /preset/status LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /preset/tap/0 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -124,6 +131,8 @@
 //   /preset/tap/7 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /preset/tap/8 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /preset/tap/9 BUTTON button=0 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /record/disk BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
+//   /record/status LABEL button=- send=0 receive=1 args=VALUE:STRING:text:0:1
 //   /status/heartbeat BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /synth/cembalo/enable BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
 //   /synth/grain/enable BUTTON button=2 send=1 receive=1 args=VALUE:FLOAT:x:0:1
@@ -141,7 +150,7 @@
 // ============================================================
 
 ~uiContract = (
-	hash: "ebc1292b",
+	hash: "56a01821",
 	build: "2026-11-17",
 	// addresses the tablet sends (each needs an OSCdef)
 	sends: [
@@ -178,7 +187,7 @@
 		"/grain/freqModAmt",
 		"/grain/freqModFreq",
 		"/grain/jitter",
-		"/grain/loadSample",
+		"/grain/liveMode",
 		"/grain/octaveDown",
 		"/grain/octaveUp",
 		"/grain/panRand",
@@ -188,7 +197,6 @@
 		"/grain/playheadRand",
 		"/grain/randDetune",
 		"/grain/randomOctave",
-		"/grain/record",
 		"/grain/speedModDepth",
 		"/grain/speedModRate",
 		"/grain/srcCembalo",
@@ -220,6 +228,10 @@
 		"/pad/wobbleRate",
 		"/pager1",
 		"/preset/deleteArm",
+		"/preset/sample/0",
+		"/preset/sample/1",
+		"/preset/sample/2",
+		"/preset/sample/3",
 		"/preset/saveArm",
 		"/preset/tap/0",
 		"/preset/tap/1",
@@ -237,6 +249,7 @@
 		"/preset/tap/7",
 		"/preset/tap/8",
 		"/preset/tap/9",
+		"/record/disk",
 		"/status/heartbeat",
 		"/synth/cembalo/enable",
 		"/synth/grain/enable",
@@ -292,7 +305,7 @@
 		"/grain/freqModAmt",
 		"/grain/freqModFreq",
 		"/grain/jitter",
-		"/grain/loadSample",
+		"/grain/liveMode",
 		"/grain/octaveDown",
 		"/grain/octaveUp",
 		"/grain/panRand",
@@ -303,7 +316,6 @@
 		"/grain/randDetune",
 		"/grain/randomOctave",
 		"/grain/recStatus",
-		"/grain/record",
 		"/grain/speedModDepth",
 		"/grain/speedModRate",
 		"/grain/srcCembalo",
@@ -354,6 +366,14 @@
 		"/preset/label/8",
 		"/preset/label/9",
 		"/preset/name",
+		"/preset/sample/0",
+		"/preset/sample/1",
+		"/preset/sample/2",
+		"/preset/sample/3",
+		"/preset/sampleLabel/0",
+		"/preset/sampleLabel/1",
+		"/preset/sampleLabel/2",
+		"/preset/sampleLabel/3",
 		"/preset/saveArm",
 		"/preset/status",
 		"/preset/tap/0",
@@ -372,6 +392,8 @@
 		"/preset/tap/7",
 		"/preset/tap/8",
 		"/preset/tap/9",
+		"/record/disk",
+		"/record/status",
 		"/status/heartbeat",
 		"/synth/cembalo/enable",
 		"/synth/grain/enable",

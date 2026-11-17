@@ -161,8 +161,10 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~touchOSC.sendMsg('/grain/timeStretch-label', ~timeStretchLabel.(allVals[~busNames[\timeStretch].index]));
 	~sendBufferLenLabel.(~bufferDurSec);
 
-	// Recorder (REC button + status line) and grain toggles
-	~sendRecStatus.();
+	// Grain loop (LIVE button + status line), sample slots, output recorder, grain toggles
+	~sendBufferStatus.();
+	~sendSampleSlots.();
+	~sendOutRecStatus.();
 	~sendToTouchOSC.('/grain/reverse',     ~reverseState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fixedPos',    ~fixedPosState.asInteger.asFloat);
 	~sendToTouchOSC.('/grain/fftFreeze',   ~fftFreezeState.asInteger.asFloat);
@@ -173,9 +175,6 @@ if(~touchOSCip.isNil or: { ~touchOSCip.isEmpty }) {
 	~sendToTouchOSC.('/grain/pitchMode/pos',
 		(~ptFixedPosSec / ~bufferDurSec.max(0.001)).clip(0.0, 1.0).asFloat);
 	~sendToTouchOSC.('/grain/pitchMode/rateScale', ~ptRateScale.asFloat);
-
-	// Disk recording
-	~sendToTouchOSC.('/record/disk', (~diskRecState ? false).asInteger.asFloat);
 
 	// Status
 	~sendToTouchOSC.('/status/rate',      ~currentRate.asFloat);
@@ -277,8 +276,8 @@ OSCdef('/grain/bufferLen', { |msg|
 // All on/off buttons are toggle buttons on the tablet: the value IS the new state (1 = on, 0 = off), and
 // the state is sent back so the button always shows what the patch does.
 
-// REC: the one switch of the recorder (main_multi.scd, ~setRecording)
-OSCdef('/grain/record', { |msg| ~setRecording.(msg[1] >= 0.5) }, "/grain/record");
+// LIVE: the one switch of the grain loop (main_multi.scd, ~setLiveMode)
+OSCdef('/grain/liveMode', { |msg| ~setLiveMode.(msg[1] >= 0.5) }, "/grain/liveMode");
 
 OSCdef('/grain/reverse', { |msg|
 	if (msg[1] >= 1.0) {
@@ -315,9 +314,8 @@ OSCdef('/grain/pitchTrackMode', { |msg|
 			~g.set(\fixedPos, 1);
 			~fixedPosState = true;
 			~sendToTouchOSC.('/grain/fixedPos', 1.0);
-			// Stop live mode (main_grain.scd only; this patch has no live mode)
-			if (~liveMode == true) { ~stopLiveMode.() };
-			~sendToTouchOSC.('/grain/liveMode', 0.0);
+			// Stop live mode: the loop holds still
+			~setLiveMode.(false);
 			// Force Impulse trigger + no rate scatter (not CC-bus driven)
 			~g.set(\sync, 1, \rateRand, 1);
 			// Zero modulation CC buses + send slider feedback to TouchOSC
@@ -438,14 +436,10 @@ OSCdef('/grain/pitchReset', { |msg|
 	};
 }, "/grain/pitchReset");
 
-// CLEAR and LOAD SAMPLE: push buttons, act on the press
+// CLEAR: a push button, acts on the press
 OSCdef('/grain/deleteBuffer', { |msg|
 	if (msg[1] >= 0.5) { ~deleteBuffer.() };
 }, "/grain/deleteBuffer");
-
-OSCdef('/grain/loadSample', { |msg|
-	if (msg[1] >= 0.5) { ~loadBuffer.(nil) };
-}, "/grain/loadSample");
 
 OSCdef('/grain/stopAudio', { |msg|
 	if (msg[1] >= 1.0) {
@@ -456,23 +450,26 @@ OSCdef('/grain/stopAudio', { |msg|
 	};
 }, "/grain/stopAudio");
 
-// ---- Disk recording (master output to file) ----
-~diskRecState = false;
-
+// ---- Output recorder: REC in the right column (main_multi.scd, ~startOutputRecording) ----
+// A toggle button: the value is the new state, the state is sent back.
 OSCdef('/record/disk', { |msg|
-	var on = msg[1] >= 0.5;
-	if (on != ~diskRecState) {
-		~diskRecState = on;
-		if (~diskRecState) {
-			s.record;
-			("Disk recording STARTED: " ++ s.recorder.path).postln;
-		} {
-			s.stopRecording;
-			"Disk recording STOPPED.".postln;
-		};
-		~sendToTouchOSC.('/record/disk', ~diskRecState.asInteger.asFloat);
-	};
+	if (msg[1] >= 0.5) { ~startOutputRecording.() } { ~stopOutputRecording.() };
 }, "/record/disk");
+
+// ---- Sample slots A-D on the preset page: load the first four files of samples/ into the grain buffer ----
+// Push buttons: act on the press; on release the slot of the loaded sample is lit again.
+~sampleSlotCount.do { |i|
+	var addr = "/preset/sample/" ++ i;
+	OSCdef(addr.asSymbol, { |msg|
+		if (msg[1] >= 0.5) {
+			~loadSampleSlot.(i);
+			// a preset stores its sample: choosing another one is a change to the loaded preset
+			if (~activePreset >= 0 and: { ~presetDirty.not }) { ~presetDirty = true; ~sendPresetName.() };
+		} {
+			~sendSampleSlots.();
+		};
+	}, addr);
+};
 
 // ---- Synth enable/disable ----
 // ~setSynthEnabled.(\grain | \tape | \cembalo | \pad, bool, focus)

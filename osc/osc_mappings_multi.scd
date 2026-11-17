@@ -155,7 +155,7 @@
 	'/master/volume':      ( busIndex: 11, type: \fader, label: "Master Volume" ),
 
 	// ---- Grain toggles (Page 4) ----
-	'/grain/record':       ( type: \toggle,   label: "REC (the recorder's one switch, replaces Live Mode)" ),
+	'/grain/liveMode':     ( type: \toggle,   label: "LIVE (write the grain input into the loop)" ),
 	'/grain/reverse':      ( type: \toggle,   label: "Reverse" ),
 	'/grain/fixedPos':     ( type: \toggle,   label: "Fixed Position" ),
 	'/grain/fftFreeze':    ( type: \toggle,   label: "FFT Freeze" ),
@@ -166,7 +166,7 @@
 	'/grain/octaveUp':     ( type: \momentary, label: "Octave Up" ),
 	'/grain/pitchReset':   ( type: \momentary, label: "Pitch Reset" ),
 	'/grain/deleteBuffer': ( type: \momentary, label: "CLEAR (empty the loop)" ),
-	'/grain/loadSample':   ( type: \momentary, label: "LOAD SAMPLE (next file of samples/)" ),
+	'/record/disk':        ( type: \toggle,   label: "REC (record the output into recordings/)" ),
 	'/grain/stopAudio':    ( type: \momentary, label: "Stop Audio" ),
 
 	// ---- Preset commands (Page 1) ----

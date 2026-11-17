@@ -124,7 +124,7 @@ SynthDef.new(\gran, {
 	var sig, env;
 	var densCtrl, durCtrl, rateCtrl, panCtrl;
 	var ptr, ptrRand, posSec;
-	var bufFrames, safeMarginSamples;
+	var bufFrames, bufSR, safeMarginSamples;
 	var octaveMultiplier, detuneOffset, freqMod;
 	var bitStepSize, bitCrushed, tanhDrive;
 	var octaveGate;
@@ -299,7 +299,9 @@ SynthDef.new(\gran, {
 	// Unsafe iff any integer k satisfies dMin-margin ≤ k*bufFrames ≤ dMax+margin.
 	// ============================================================
 
-	bufFrames        = BufFrames.ir(buf);
+	// .kr, not .ir: the buffer is swapped for a sample or a new length while the synth runs
+	bufFrames        = BufFrames.kr(buf);
+	bufSR            = BufSampleRate.kr(buf);  // positions in seconds -> frames (a sample can be 44.1 kHz)
 	safeMarginSamples = safeMargin * SampleRate.ir;
 
 	ptr          = In.ar(ptrBus, 1);
@@ -323,7 +325,7 @@ SynthDef.new(\gran, {
 			(ptr - desiredDelay).wrap(0, bufFrames),                   // normal mode
 			(ptr - desiredDelay + tsOffset).wrap(0, bufFrames)         // reconstruction mode
 		]),
-		(fixedPosSec * SampleRate.ir + ptrRand).wrap(0, bufFrames)
+		(fixedPosSec * bufSR + ptrRand).wrap(0, bufFrames)
 	]);
 
 	d0       = candidateCenter - (0.5 * durSamp * grainRate) - ptr;
@@ -353,7 +355,7 @@ SynthDef.new(\gran, {
 	safeCenter = Select.ar(isUnsafe,         [candidateCenter, (candidateCenter + snapDelta).wrap(0, bufFrames)]);
 	safeCenter = Select.ar(spanExceedsBuffer, [safeCenter,      fallbackCenter]);
 
-	posSec = safeCenter / bufFrames * BufDur.ir(buf);
+	posSec = safeCenter / bufFrames * BufDur.kr(buf);
 
 	// ---- Read-pointer sine modulation (CC 56/57) ----
 	// Sine LFO smoothly slows/freezes grain read position each cycle.
@@ -374,21 +376,21 @@ SynthDef.new(\gran, {
 	fixedPosTrig  = K2A.ar(fixedPos);
 	fixedPosRise  = HPZ1.ar(fixedPosTrig) > 0;                          // one-sample rising edge
 	fpHasPressed  = Latch.ar(fixedPosTrig, fixedPosRise);               // stays 1 after first press
-	fpLatchFrame  = Latch.ar(posSec * SampleRate.ir, fixedPosRise);     // heard pos in frames at press
-	fpLatchDelay  = Latch.ar(ptr - (posSec * SampleRate.ir), fixedPosRise); // write-head offset at press
+	fpLatchFrame  = Latch.ar(posSec * bufSR, fixedPosRise);     // heard pos in frames at press
+	fpLatchDelay  = Latch.ar(ptr - (posSec * bufSR), fixedPosRise); // write-head offset at press
 
 	fpResumeFrame = (ptr - fpLatchDelay).wrap(0, bufFrames);            // moves forward from latch point
 	fpFrozenFrame = (fpLatchFrame + (LFNoise1.ar(100) * fixedPosRand * bufFrames)).clip(0, bufFrames - 1);
 
 	normalModePosSec = Select.ar(fixedPosTrig, [
-		Select.ar(fpHasPressed, [posSec, fpResumeFrame / bufFrames * BufDur.ir(buf)]),  // 0: live or resume
-		fpFrozenFrame / bufFrames * BufDur.ir(buf)                                      // 1: frozen
+		Select.ar(fpHasPressed, [posSec, fpResumeFrame / bufFrames * BufDur.kr(buf)]),  // 0: live or resume
+		fpFrozenFrame / bufFrames * BufDur.kr(buf)                                      // 1: frozen
 	]);
 
 	// XY mode: original fixedPosSec-arg path — XY voices set this from touch X.
 	xyFixedPosSec = Select.ar(fixedPosTrig, [
 		posSec,
-		(fixedPosSec + (LFNoise1.ar(100) * fixedPosRand * BufDur.ir(buf))).clip(0, BufDur.ir(buf))
+		(fixedPosSec + (LFNoise1.ar(100) * fixedPosRand * BufDur.kr(buf))).clip(0, BufDur.kr(buf))
 	]);
 
 	posSec = Select.ar(K2A.ar(xyMode), [normalModePosSec, xyFixedPosSec]);

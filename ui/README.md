@@ -28,19 +28,36 @@ Commit all three files. Enable the pre-commit hook once per clone with `git conf
    its first control.
 4. At boot, SC also checks that every tablet control has an OSCdef and warns about the ones that don't.
 
-## Grain recorder (bottom left of the grain page)
+## Grain loop (bottom left of the grain page)
 
 The grain buffer is a loop of *BufferLen* seconds that the write head runs through all the time.
 
 | Control | What it does |
 |---|---|
-| **REC** | on: the input is written into the loop. Overdub: *Feedback* sets how much of the old content stays, and the grains follow just behind the write head. off: the loop is kept and keeps playing. |
-| status line | `RECORDING` / `LOOP` (holds a recording) / sample name / `EMPTY`, plus the loop length |
-| **CLEAR** | empties the loop; REC stays as it is |
-| **LOAD SAMPLE** | loads the next file from `samples/` (wav, aif, flac, ogg) and switches REC off, so the sample isn't overwritten right away |
+| **LIVE** | on: the input is written into the loop. Overdub: *Feedback* sets how much of the old content stays, and the grains follow just behind the write head. off: the loop is kept and keeps playing. |
+| status line | `LIVE` / `LOOP` (holds a recording) / sample name / `EMPTY`, plus the loop length |
+| **CLEAR** | empties the loop; LIVE stays as it is |
 
 *BufferLen* creates a new, empty loop once the fader has been still for 0.4 s. Loading a preset keeps the
 loop unless the preset has a different length.
+
+## Samples (preset page, under the status line)
+
+The four slots **A–D** load the first four sound files of `samples/` (wav, aif, flac, ogg, mp3), in alphabetical order, into the grain
+buffer. Name the files `1 rain.wav`, `2 voice.wav`, ... to choose the order. Each slot shows its file's name,
+and the slot whose sample is in the buffer is lit. Loading a sample switches LIVE off. Only the first channel
+of a stereo file is used, and the loop is as long as the sample.
+
+A preset stores the sample that is in the buffer. Loading it brings that sample back, unless it is already
+loaded. A preset without a sample keeps the sample that is loaded. Switching LIVE on, CLEAR and *BufferLen*
+replace the sample.
+
+## REC: recording the output (right column, under the master fader)
+
+**REC** records what the instrument plays (outputs 1–2 after the output limiter, so exactly what you hear) into
+`recordings/`, one 24-bit WAV per take, named `multi_<date>_<time>.wav`. While it records, the button shows the
+running time. `REC_DIR=/path` in the environment records somewhere else (a USB stick, for example). Stopping
+closes the file and flushes it to the card. A take that is still running when the power goes is cut off.
 
 All on/off buttons are toggle buttons: the tablet sends the new state, and SC sends it back. This keeps the
 lights in sync with what the patch does.

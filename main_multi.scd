@@ -403,7 +403,6 @@ s.waitForBoot {
 	~pitchTrackMode   = false;
 	~ptRateScale      = 0.0;
 	~ptFixedPosSec    = 0.0;
-	~samplePath       = nil;
 
 	// ---- MultiXY voice state (5 pads = 5 fingers, 5 voices) ----
 	// A pad is not tied to a voice: with HOLD, a voice keeps sounding after its finger has left, and the next
@@ -422,41 +421,71 @@ s.waitForBoot {
 	};
 
 	// ============================================================
-	// Recorder: the grain buffer
+	// Grain buffer: LIVE mode, samples
 	// ============================================================
 	// The buffer is a loop of ~bufferDurSec seconds; the write head runs through it all the time.
-	//   REC on  (recording): the grain input is written into the loop. Overdub: the Feedback fader sets how
-	//                        much of the old content stays. Grains and XY voices follow just behind the head.
-	//   REC off (holding):   nothing is written, the loop keeps playing. XY voices play fixed positions.
-	// One switch: the tablet's REC button (/grain/record). CLEAR empties the loop, LOAD SAMPLE puts the next
-	// file of samples/ into it (and switches REC off, so the sample is not overwritten right away).
-	// The tablet's status line (/grain/recStatus) says what the loop holds: RECORDING / LOOP / SAMPLE / EMPTY.
-	~recState      = false;
+	//   LIVE on:  the grain input is written into the loop. Overdub: the Feedback fader sets how much of the old
+	//             content stays. Grains and XY voices follow just behind the head.
+	//   LIVE off: nothing is written, the loop keeps playing. XY voices play fixed positions.
+	// LIVE (/grain/liveMode) is the loop's one switch. CLEAR empties the loop. The four SAMPLE slots on the preset
+	// page put a sample into it (the first four files of samples/, alphabetically) and switch LIVE off, so the
+	// sample is not overwritten right away.
+	// The status line (/grain/recStatus) says what the loop holds: LIVE / LOOP / sample name / EMPTY.
+	~liveMode      = false;
 	~bufferContent = \empty;   // \empty | \recorded | \sample (status line only)
 	~sampleName    = nil;
+	~samplePath    = nil;      // the file in the buffer (stored in presets), nil = no sample
 	~samplesDir    = ~basePath ++ "samples/";
-	~sampleIndex   = -1;
-	~sampleExtensions = #["wav", "aif", "aiff", "flac", "ogg"];
+	~sampleExtensions = #["wav", "aif", "aiff", "flac", "ogg", "mp3"];  // mp3: needs libsndfile 1.1 or newer
+	~sampleSlotCount  = 4;
+	~sampleSlotNames  = #["A", "B", "C", "D"];
 
-	~sendRecStatus = {
+	~sendBufferStatus = {
 		var len = ~bufferDurSec.round(0.1).asString ++ " s";
 		var text = case
-			{ ~recState } { "RECORDING  " ++ len }
+			{ ~liveMode } { "LIVE  " ++ len }
 			{ ~bufferContent == \sample } { (~sampleName ? "sample").keep(16) ++ "  " ++ len }
 			{ ~bufferContent == \recorded } { "LOOP  " ++ len }
 			{ "EMPTY  " ++ len };
 		~touchOSC !? {
-			~touchOSC.sendMsg('/grain/record', ~recState.asInteger.asFloat);
+			~touchOSC.sendMsg('/grain/liveMode', ~liveMode.asInteger.asFloat);
 			~touchOSC.sendMsg('/grain/recStatus', text);
 		};
 	};
 
-	~setRecording = { |on|
-		~recState = on;
+	// Sound files of samples/, alphabetically (name them "1 rain.wav", "2 voice.wav", ... to order the slots)
+	~sampleFiles = {
+		if (File.exists(~samplesDir)) {
+			PathName(~samplesDir).files.select { |f| ~sampleExtensions.includesEqual(f.extension.toLower) }
+				.sort { |f1, f2| f1.fileName < f2.fileName }
+		} { [] };
+	};
+
+	// Preset page: /preset/sample/N (lit = this sample is in the buffer), label /preset/sampleLabel/N
+	~sendSampleSlots = {
+		var files = ~sampleFiles.();
+		~touchOSC !? {
+			~sampleSlotCount.do { |i|
+				var f = files[i];
+				~touchOSC.sendMsg("/preset/sampleLabel/" ++ i,
+					~sampleSlotNames[i] ++ "   " ++ if (f.notNil) { f.fileNameWithoutExtension.keep(18) } { "-" });
+				~touchOSC.sendMsg("/preset/sample/" ++ i,
+					(f.notNil and: { f.fullPath == ~samplePath }).asInteger.asFloat);
+			};
+		};
+	};
+
+	~setLiveMode = { |on|
+		~liveMode = on;
 		~rec.set(\recGate, on.asInteger);
-		if (on) { ~bufferContent = \recorded; ~sampleName = nil };
-		~sendRecStatus.();
-		("Record: " ++ if (on, "ON", "OFF (holding the loop)")).postln;
+		if (on) {
+			~bufferContent = \recorded;
+			~sampleName = nil;
+			~samplePath = nil;
+			~sendSampleSlots.();
+		};
+		~sendBufferStatus.();
+		("Live mode: " ++ if (on, "ON", "OFF (holding the loop)")).postln;
 	};
 
 	// Point every reader / writer at a new buffer, then free the old one
@@ -473,54 +502,143 @@ s.waitForBoot {
 
 	~deleteBuffer = {
 		b.zero;
-		~bufferContent = if (~recState) { \recorded } { \empty };
+		~bufferContent = if (~liveMode) { \recorded } { \empty };
 		~sampleName = nil;
-		~sendRecStatus.();
+		~samplePath = nil;
+		~sendBufferStatus.();
+		~sendSampleSlots.();
 		"Buffer cleared.".postln;
 	};
 
-	// path: a sound file; nil = the next file in samples/ (in alphabetical order, starts over at the end)
+	// The BufferLen fader (0.1 .. 8 s) follows the buffer's length, e.g. a loaded sample's; the label shows the
+	// exact length (a sample longer than 8 s puts the fader at the top). Stored in presets like any fader.
+	~showBufferLen = { |durSec|
+		var val = durSec.linlin(0.1, 8.0, 0.0, 1.0);
+		~ccBuses.setAt(~busNames[\bufferLen].index, val);
+		~sendToTouchOSC !? { ~sendToTouchOSC.('/grain/bufferLen', val) };
+		~sendBufferLenLabel !? { ~sendBufferLenLabel.(durSec) };
+	};
+
+	// path: a sound file. Only the first channel of a stereo file is used.
 	~loadBuffer = { |path|
-		var files;
-		if (path.isNil) {
-			files = if (File.exists(~samplesDir)) {
-				PathName(~samplesDir).files.select { |f| ~sampleExtensions.includesEqual(f.extension.toLower) }
-					.sort { |f1, f2| f1.fileName < f2.fileName }
-			} { [] };
-			if (files.isEmpty) {
-				~touchOSC !? { ~touchOSC.sendMsg('/grain/recStatus', "no files in samples/") };
-				("No sound files in " ++ ~samplesDir).warn;
-			} {
-				~sampleIndex = (~sampleIndex + 1) % files.size;
-				path = files[~sampleIndex].fullPath;
-			};
-		};
 		path !? {
-			~setRecording.(false);
+			~setLiveMode.(false);
 			Buffer.readChannel(s, path, channels: [0], action: { |buf|
-				~switchBuffer.(buf);
-				~bufferContent = \sample;
-				~sampleName = PathName(path).fileNameWithoutExtension;
-				~sendBufferLenLabel !? { ~sendBufferLenLabel.(~bufferDurSec) };
-				~sendRecStatus.();
-				("Sample loaded: % (% s)".format(path, ~bufferDurSec.round(0.01))).postln;
+				if (buf.numFrames.isNil or: { buf.numFrames < 64 }) {
+					// unreadable or empty file: keep the loop as it is
+					buf.free;
+					~touchOSC !? { ~touchOSC.sendMsg('/grain/recStatus', "cannot read " ++ PathName(path).fileName.keep(14)) };
+					("Sample could not be read: " ++ path).warn;
+				} {
+					~switchBuffer.(buf);
+					~bufferContent = \sample;
+					~samplePath = path;
+					~sampleName = PathName(path).fileNameWithoutExtension;
+					~showBufferLen.(~bufferDurSec);
+					~sendBufferStatus.();
+					~sendSampleSlots.();
+					("Sample loaded: % (% s)".format(path, ~bufferDurSec.round(0.01))).postln;
+				};
 			});
 		};
 	};
 
-	// New, empty buffer of durSec seconds; REC stays as it is
+	// Preset page sample slot i (0..3): the i-th sound file of samples/
+	~loadSampleSlot = { |i|
+		var f = ~sampleFiles.()[i];
+		if (f.isNil) {
+			("Sample slot %: no file (samples/ has fewer than % sound files)".format(~sampleSlotNames[i], i + 1)).warn;
+			~sendSampleSlots.();
+		} {
+			~loadBuffer.(f.fullPath);
+		};
+	};
+
+	// New, empty buffer of durSec seconds; LIVE stays as it is
 	~allocBuffer = { |durSec|
 		durSec = durSec ? ~bufferDurSec;
 		fork {
 			var buf = Buffer.alloc(s, (s.sampleRate * durSec).round.asInteger, 1);
 			s.sync;
 			~switchBuffer.(buf);
-			~bufferContent = if (~recState) { \recorded } { \empty };
+			~bufferContent = if (~liveMode) { \recorded } { \empty };
 			~sampleName = nil;
+			~samplePath = nil;
 			~sendBufferLenLabel !? { ~sendBufferLenLabel.(durSec) };  // the label; the fader keeps its 0..1 value
-			~sendRecStatus.();
+			~sendBufferStatus.();
+			~sendSampleSlots.();
 			("Buffer allocated: " ++ durSec.round(0.01) ++ " s (" ++ buf.numFrames ++ " frames)").postln;
 		};
+	};
+
+	// ============================================================
+	// Output recorder: what the instrument plays, into a file
+	// ============================================================
+	// REC (right column, /record/disk) records hardware outputs 1-2 after the output safety stage, i.e. exactly what
+	// you hear, into recordings/ (or $REC_DIR) as 24-bit WAV, one file per take: multi_2026-11-17_20-15-03.wav.
+	// The button's label shows the running time (/record/status). Stopping closes the file and flushes it to the
+	// card (sync). A take that is still running when the power goes is cut off and may need repairing.
+	// From code: ~startOutputRecording.()  /  ~stopOutputRecording.()
+	~outRecDir = "REC_DIR".getenv;
+	if (~outRecDir.isNil or: { ~outRecDir.isEmpty }) { ~outRecDir = ~basePath ++ "recordings/" };
+	~outRecDir = ~outRecDir.standardizePath.withTrailingSlash;
+	~outRecState = false;
+	~outRecStart = 0;
+	~outRecPath  = nil;
+	~outRecTask  = nil;
+
+	~outRecTime = { |sec|
+		sec = sec.asInteger;
+		(sec div: 60).asString ++ ":" ++ (sec % 60).asString.padLeft(2, "0")
+	};
+
+	~sendOutRecStatus = {
+		~touchOSC !? {
+			~touchOSC.sendMsg('/record/disk', ~outRecState.asInteger.asFloat);
+			~touchOSC.sendMsg('/record/status',
+				if (~outRecState) { "● REC  " ++ ~outRecTime.(Main.elapsedTime - ~outRecStart) } { "REC" });
+		};
+	};
+
+	~startOutputRecording = {
+		if (~outRecState.not) {
+			File.mkdir(~outRecDir);
+			~outRecPath = ~outRecDir ++ "multi_" ++ Date.getDate.format("%Y-%m-%d_%H-%M-%S") ++ ".wav";
+			s.recorder.recHeaderFormat = "wav";
+			s.recorder.recSampleFormat = "int24";
+			s.recorder.record(~outRecPath, 0, 2);
+			~outRecState = true;
+			~outRecStart = Main.elapsedTime;
+			// running time on the tablet; notices when the recorder stopped by itself (server gone, disk error)
+			~outRecTask = Routine({
+				loop {
+					~sendOutRecStatus.();
+					1.wait;
+					if ((Main.elapsedTime - ~outRecStart > 3) and: { s.recorder.isRecording.not }) {
+						"Output recording stopped by itself (server gone or the file could not be written).".warn;
+						~outRecTask = nil;
+						~stopOutputRecording.();
+						nil.alwaysYield;
+					};
+				};
+			}).play(AppClock);
+			("Output recording STARTED: " ++ ~outRecPath).postln;
+		};
+		~sendOutRecStatus.();
+	};
+
+	~stopOutputRecording = {
+		if (~outRecState) {
+			~outRecState = false;
+			~outRecTask !? { ~outRecTask.stop; ~outRecTask = nil };
+			if (s.recorder.isRecording) { s.recorder.stopRecording };
+			("Output recording STOPPED after %: %".format(~outRecTime.(Main.elapsedTime - ~outRecStart), ~outRecPath)).postln;
+			// the server closes the file asynchronously: flush it to the card a moment later
+			if (thisProcess.platform.name != \windows) {
+				AppClock.sched(1.0, { ("sync -- " ++ ~outRecDir.shellQuote).unixCmd(postOutput: false); nil });
+			};
+		};
+		~sendOutRecStatus.();
 	};
 
 	// ============================================================
@@ -610,7 +728,7 @@ s.waitForBoot {
 		var now = Main.elapsedTime;
 		var dt, pendingCount;
 		if (~xyVoices[slot].isNil) {
-			st = (slot: slot, rec: ~recState, x: x, y: y, speed: 0.0, lastTime: now, born: now);
+			st = (slot: slot, rec: ~liveMode, x: x, y: y, speed: 0.0, lastTime: now, born: now);
 			~xyVoiceState[slot] = st;
 			pendingCount = (~xyVoices.select(_.notNil).size + 1).max(1);
 			~xyVoices[slot] = Synth(\gran, [

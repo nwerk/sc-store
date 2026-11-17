@@ -106,8 +106,9 @@ if (File.exists(~presetDir).not) {
 	data[\faders] = faderVals;
 
 	// Toggle states
-	data[\recState]      = ~recState.asInteger;
-	data[\liveMode]      = (~liveMode ? false).asInteger;  // main_grain.scd only (main_multi: REC alone)
+	// grain loop: main_grain.scd has REC and LIVE (the same record gate), main_multi.scd LIVE only
+	data[\recState]      = (~recState ? false).asInteger;
+	data[\liveMode]      = (~liveMode ? false).asInteger;
 	data[\reverseState]  = ~reverseState.asInteger;
 	data[\fixedPosState] = ~fixedPosState.asInteger;
 	data[\fftFreezeState]   = ~fftFreezeState.asInteger;
@@ -140,7 +141,7 @@ if (File.exists(~presetDir).not) {
 ~loadPreset = { |index|
 	var path = ~presetPath.(index);
 	var data = ~readPresetData.(path);
-	var presetLen;
+	var presetLen, presetSample;
 
 	if (data.notNil) {
 
@@ -166,12 +167,17 @@ if (File.exists(~presetDir).not) {
 		~pitchTrackMode   = (data[\pitchTrackMode] ? 0).asBoolean;
 		~ptRateScale      = data[\ptRateScale]    ? 0.0;
 		~ptFixedPosSec    = data[\ptFixedPosSec]  ? 0.0;
-		~samplePath       = data[\samplePath];
+		presetSample      = data[\samplePath];
+		if (presetSample.notNil and: { File.exists(presetSample).not }) {
+			("Preset %: its sample % is missing.".format(index, presetSample)).warn;
+			presetSample = nil;
+		};
 
 		// Apply toggle states to synths
-		if (~setRecording.notNil) {
-			// main_multi.scd: REC is the only recorder switch; older presets kept "Live Mode" separately
-			~setRecording.(~recState or: { ~liveMode });
+		if (~setLiveMode.notNil) {
+			// main_multi.scd: LIVE is the loop's only switch; presets from the REC-only version stored it as recState
+			~setLiveMode.(~liveMode or: { ~recState });
+			~recState = false;  // merged into LIVE: not saved again
 		} {
 			~rec.set(\recGate, ~recState.asInteger);
 			if (~liveMode) { ~startLiveMode.() } { ~stopLiveMode.() };
@@ -185,8 +191,14 @@ if (File.exists(~presetDir).not) {
 		       \ptRateScale,    ~ptRateScale,
 		       \fixedPosSec,    ~ptFixedPosSec);
 		if (~pitchTrackMode) { ~g.set(\fixedPos, 1) };
-		// a sample that is gone (deleted, other machine) must not stop the preset from loading
-		if (~samplePath.notNil and: { File.exists(~samplePath) }) { ~loadBuffer.(~samplePath) };
+		// The preset's sample (a sample that is gone, deleted or on another machine, must not stop the preset
+		// from loading). main_multi.scd: a sample that is already in the buffer is not loaded again.
+		if (~setLiveMode.notNil) {
+			if (presetSample.notNil and: { presetSample != ~samplePath }) { ~loadBuffer.(presetSample) };
+		} {
+			~samplePath = presetSample;
+			~samplePath !? { ~loadBuffer.(~samplePath) };
+		};
 		// main_multi.scd: grain input sources (presets saved before this existed keep the current ones)
 		if (data[\grainSrc].notNil and: { ~grainSrc.notNil }) {
 			data[\grainSrc].keysValuesDo { |k, v| if (~grainSrc.includesKey(k)) { ~grainSrc[k] = v } };
@@ -201,8 +213,16 @@ if (File.exists(~presetDir).not) {
 
 		// Reallocate the buffer if the stored length differs (a new buffer is empty: the same length keeps
 		// the recorded loop). After the toggle states, so the recording state is already restored.
+		// Not while the buffer holds a sample (main_multi.scd): its length is the sample's, and a preset without
+		// a sample keeps the sample that is loaded.
 		presetLen = (data[\faders][~busNames[\bufferLen].index] ? 0.5).linlin(0.0, 1.0, 0.1, 8.0);
-		if ((presetLen - ~bufferDurSec).abs > 0.001) { ~allocBuffer.(presetLen) };
+		if (presetSample.isNil and: { ~samplePath.isNil or: { ~setLiveMode.isNil } }
+			and: { (presetLen - ~bufferDurSec).abs > 0.001 }) { ~allocBuffer.(presetLen) };
+		// main_multi.scd: a sample that stays loaded keeps its length on the BufferLen fader too
+		if (~showBufferLen.notNil and: { presetSample.isNil } and: { ~samplePath.notNil }) {
+			data[\faders][~busNames[\bufferLen].index] = ~bufferDurSec.linlin(0.1, 8.0, 0.0, 1.0);
+			~ccBuses.setAt(~busNames[\bufferLen].index, data[\faders][~busNames[\bufferLen].index]);
+		};
 
 		~activePreset = index;
 		~presetDirty = false;
@@ -295,7 +315,7 @@ OSCdef('/preset/deleteArm', { |msg|
 // ---- "changed since loaded" marker (PRESET 3 *) ----
 // Any value the tablet changes that a preset stores marks the preset as changed. Gestures that are not stored
 // (XY pads, sample loading, stop) and the footswitch / expression pedal do not.
-~presetDirtyIgnore = ["/grain/xy/", "/grain/loadSample", "/grain/deleteBuffer", "/grain/stopAudio"];
+~presetDirtyIgnore = ["/grain/xy/", "/grain/deleteBuffer", "/grain/stopAudio"];
 ~presetDirtyPrefixes = ["/grain/", "/tape/", "/cembalo/", "/pad/", "/master/"];
 ~presetDirtyWatcher !? { thisProcess.removeOSCRecvFunc(~presetDirtyWatcher) };
 ~presetDirtyWatcher = { |msg, time, addr|
