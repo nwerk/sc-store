@@ -842,6 +842,33 @@ s.waitForBoot {
 		nil;
 	});
 
+	// ---- Performance log ----
+	// One line every 2 s: scsynth's DSP load (average and peak, % of the time one audio block may take), synths
+	// running, and from the pitch tracker its load, dropped frames, worst frame and the JACK xruns since it started
+	// (every JACK client hears about every xrun: a growing xrun count = dropouts = crackles).
+	// On with PERF_LOG=1 in the environment (PERF_LOG=1 /usr/local/sc-patches/boot-sc.sh dev), or ~perfLog.(true).
+	~perfLog = { |on = true|
+		~perfLogRoutine !? { ~perfLogRoutine.stop; ~perfLogRoutine = nil };
+		if (on) {
+			~perfLogRoutine = Routine({
+				var lastX = nil;
+				loop {
+					var t = ~tartini, x = t !? { t[\xruns] } ? -1, tracker;
+					tracker = if (t.notNil and: { t[\running] } and: { (Main.elapsedTime - t[\lastSeen]) < 3 }) {
+						"tracker %%, dropped %, worst % ms".format((t[\load] * 100).round(1), "%", t[\dropped], t[\worst].round(0.1))
+					} { "tracker off" };
+					("perf: scsynth avg %%  peak %%  synths %  |  %  |  JACK xruns %%".format(
+						s.avgCPU.round(0.1), "%", s.peakCPU.round(0.1), "%", s.numSynths, tracker,
+						if (x < 0) { "?" } { x },
+						if (lastX.notNil and: { lastX >= 0 } and: { x > lastX }) { " (+" ++ (x - lastX) ++ ")" } { "" })).postln;
+					lastX = x;
+					2.wait;
+				}
+			}).play(SystemClock);
+		};
+	};
+	if ("PERF_LOG".getenv == "1") { ~perfLog.(true) };
+
 	"Multi-synth patch booted (grain ON, tape OFF, cembalo OFF, pad OFF; grain input: guitar).".postln;
 	// Level meters: only where somebody can see them. On the headless Pi (Qt offscreen, see run-sc-main_multi.sh)
 	// they would cost a metering synth and 20 window updates per second in sclang for nothing.

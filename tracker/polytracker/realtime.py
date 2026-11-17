@@ -187,7 +187,7 @@ class Runner:
                 if now - last_stats >= 1.0:
                     load = busy / (now - last_stats)
                     if self.out:
-                        self.out.send_stats(load, self.frames, self.dropped, worst * 1e3)
+                        self.out.send_stats(load, self.frames, self.dropped, worst * 1e3, getattr(self.source, "xruns", 0))
                     if self.verbose:
                         print(f"[polytracker] load {100 * load:.1f}%  worst {worst * 1e3:.2f} ms  frames {self.frames} "
                               f"dropped {self.dropped} xruns {getattr(self.source, 'xruns', 0)}", flush=True)

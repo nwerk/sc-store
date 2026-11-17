@@ -210,4 +210,4 @@ scripts/jack_play.py song.wav --connect polytracker:in     # simulate a guitar o
 Control messages (UDP, default port 57150): `/polytracker/set name value` (`on off onset gate_db retrigger_ms
 on_confirm_ms off_confirm_ms amp_range_db glide_alpha refine mono_mode pause`), `/polytracker/reset`,
 `/polytracker/quit`. Events to sclang: `/polytracker/noteOn voice midi freq amp`, `/polytracker/noteOff voice
-midi`, `/polytracker/stats load frames dropped worst_ms`, `/polytracker/ready model bus voices`.
+midi`, `/polytracker/stats load frames dropped worst_ms xruns`, `/polytracker/ready model bus voices`.

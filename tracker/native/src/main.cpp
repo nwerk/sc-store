@@ -256,9 +256,10 @@ public:
         }
     }
 
-    void send_stats(double load, long frames, long dropped, double worst_ms) {
+    // xruns: JACK xruns since the start (every JACK client is told about every xrun of the whole graph)
+    void send_stats(double load, long frames, long dropped, double worst_ms, int xruns) {
         osc::Writer w("/polytracker/stats");
-        lang_.send(w.f(float(load)).i(int32_t(frames)).i(int32_t(dropped)).f(float(worst_ms)).packet());
+        lang_.send(w.f(float(load)).i(int32_t(frames)).i(int32_t(dropped)).f(float(worst_ms)).i(int32_t(xruns)).packet());
     }
 
     void hello(const std::string& model_name) {
@@ -543,7 +544,7 @@ public:
             const double now = now_s();
             if (now - last_stats >= 1.0) {
                 const double load = busy / (now - last_stats);
-                if (out_) out_->send_stats(load, frames, dropped, worst * 1e3);
+                if (out_) out_->send_stats(load, frames, dropped, worst * 1e3, src_.xruns.load());
                 if (verbose_)
                     std::printf("[polytracker] load %.1f%%  worst %.2f ms  frames %ld dropped %ld xruns %d\n",
                                 100 * load, worst * 1e3, frames, dropped, src_.xruns.load());

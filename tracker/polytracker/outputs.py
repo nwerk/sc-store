@@ -87,8 +87,9 @@ class OscOutput:
             else:
                 self.lang.send(encode("/polytracker/noteOff", (e.voice, e.pitch)))
 
-    def send_stats(self, load: float, frames: int, dropped: int, worst_ms: float):
-        self.lang.send(encode("/polytracker/stats", (float(load), int(frames), int(dropped), float(worst_ms))))
+    def send_stats(self, load: float, frames: int, dropped: int, worst_ms: float, xruns: int = 0):
+        """xruns: JACK xruns since the start (every JACK client is told about every xrun of the whole graph)."""
+        self.lang.send(encode("/polytracker/stats", (float(load), int(frames), int(dropped), float(worst_ms), int(xruns))))
 
     def hello(self, model_name: str):
         self.lang.send(encode("/polytracker/ready", (model_name, self.base, self.voices)))

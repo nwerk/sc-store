@@ -119,6 +119,9 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 	t[\running] = false;
 	t[\lastSeen] = 0;
 	t[\load] = 0;
+	t[\dropped] = 0;
+	t[\worst] = 0;
+	t[\xruns] = -1;
 	t[\ownedBuses] = List.new;
 	t[\settings] = IdentityDictionary.new;  // replayed to the tracker process when it reports ready (UDP sent earlier is lost)
 
@@ -228,8 +231,11 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 			OSCdef(\polyTracker_stats, { |msg|
 				me[\lastSeen] = Main.elapsedTime;
 				me[\load] = msg[1];
+				me[\dropped] = msg[3];
+				me[\worst] = msg[4];
+				me[\xruns] = msg[5] ? -1;  // JACK xruns since the tracker started (-1: older tracker without it)
 				if(o[\verbose]) {
-					("polyTracker: load " ++ (msg[1] * 100).round(0.1) ++ "%, frames " ++ msg[2] ++ ", dropped " ++ msg[3] ++ ", worst " ++ msg[4].round(0.01) ++ " ms").postln;
+					("polyTracker: load " ++ (msg[1] * 100).round(0.1) ++ "%, frames " ++ msg[2] ++ ", dropped " ++ msg[3] ++ ", worst " ++ msg[4].round(0.01) ++ " ms, JACK xruns " ++ me[\xruns]).postln;
 				};
 			}, '/polytracker/stats');
 			OSCdef(\polyTracker_ready, { |msg|
