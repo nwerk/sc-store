@@ -270,7 +270,9 @@ fi
 # not change with a checkout. Say so when they are older than this checkout's versions.
 if [[ "$ON_PI" -eq 1 ]]; then
     for pair in "launchers/boot-sc.sh:/usr/local/sc-patches/boot-sc.sh" \
-                "launchers/sc-boot.service:/etc/systemd/system/sc-boot.service"; do
+                "launchers/sc-boot.service:/etc/systemd/system/sc-boot.service" \
+                "launchers/single_press.sh:/usr/local/pisound/scripts/pisound-btn/single_press.sh" \
+                "launchers/double_press.sh:/usr/local/pisound/scripts/pisound-btn/double_press.sh"; do
         src="$REPO/${pair%%:*}"; dest="${pair#*:}"
         if [[ -f "$src" && -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
             echo "Warning: $dest differs from ${pair%%:*} of this checkout; install it with launchers/install-pi.sh"

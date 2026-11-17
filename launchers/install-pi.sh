@@ -12,6 +12,8 @@
 # Installs:
 #   launchers/boot-sc.sh     -> /usr/local/sc-patches/boot-sc.sh
 #   launchers/sc-boot.service -> /etc/systemd/system/sc-boot.service (+ systemctl daemon-reload)
+#   launchers/single_press.sh, double_press.sh -> /usr/local/pisound/scripts/pisound-btn/ (the pisound button;
+#                                                 only if that directory exists)
 # Each file is written under a temporary name and renamed when complete (power-loss safe); the previous version
 # is kept next to it as *.old. A patch that is running keeps running; the new files apply from the next start.
 # run-sc-main_multi.sh warns at every start while an installed copy differs from the repository.
@@ -21,6 +23,7 @@ set -e
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 BOOT_DEST=/usr/local/sc-patches/boot-sc.sh
 UNIT_DEST=/etc/systemd/system/sc-boot.service
+BTN_DIR=/usr/local/pisound/scripts/pisound-btn
 
 install_file() {   # source, destination, mode
     local src="$1" dest="$2" mode="$3"
@@ -38,6 +41,10 @@ install_file() {   # source, destination, mode
 }
 
 install_file "$REPO/launchers/boot-sc.sh" "$BOOT_DEST" 755 || true
+if [[ -d "$BTN_DIR" ]]; then
+    install_file "$REPO/launchers/single_press.sh" "$BTN_DIR/single_press.sh" 755 || true
+    install_file "$REPO/launchers/double_press.sh" "$BTN_DIR/double_press.sh" 755 || true
+fi
 if install_file "$REPO/launchers/sc-boot.service" "$UNIT_DEST" 644; then
     sudo systemctl daemon-reload
     echo "systemd reloaded; the service uses the new unit from its next start (sudo systemctl restart sc-boot.service)."

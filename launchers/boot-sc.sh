@@ -24,7 +24,8 @@ BRANCH="${1:-prod}"
 _SERVICE_PID=$(systemctl show sc-boot.service --property=MainPID --value 2>/dev/null || echo "0")
 if [[ "$_SERVICE_PID" != "0" && "$_SERVICE_PID" != "$$" ]]; then
     echo "[boot-sc] Stopping sc-boot.service (PID: $_SERVICE_PID)..."
-    systemctl stop sc-boot.service || true
+    # as root (old button scripts) directly, as `patch` through sudo -n (no password prompt)
+    systemctl stop sc-boot.service 2>/dev/null || sudo -n systemctl stop sc-boot.service || true
     sleep 2
 fi
 
