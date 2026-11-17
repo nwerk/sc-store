@@ -249,6 +249,18 @@ if [[ "$ON_PI" -eq 1 ]]; then
     report_pi_throttling "at start"
 fi
 
+# 2.45. Installed start scripts (Pi): sc-boot.service and the buttons run copies outside the repository, which do
+# not change with a checkout. Say so when they are older than this checkout's versions.
+if [[ "$ON_PI" -eq 1 ]]; then
+    for pair in "launchers/boot-sc.sh:/usr/local/sc-patches/boot-sc.sh" \
+                "launchers/sc-boot.service:/etc/systemd/system/sc-boot.service"; do
+        src="$REPO/${pair%%:*}"; dest="${pair#*:}"
+        if [[ -f "$src" && -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
+            echo "Warning: $dest differs from ${pair%%:*} of this checkout; install it with launchers/install-pi.sh"
+        fi
+    done
+fi
+
 # 2.5. JACK
 if [[ "$ON_PI" -eq 1 ]]; then
     # Detect a Focusrite interface and switch JACK to it if present

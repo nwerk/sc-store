@@ -57,7 +57,7 @@ Same machine, same benchmark (six voices sounding), mean per frame:
 | machine | Python | native |
 |---|---|---|
 | laptop (i9-13900H, performance core, on battery) | 2.8 ms | 0.59 ms |
-| Raspberry Pi 4 (32-bit OS) | 7.1 ms | 11.3 ms with the vector code compiled as scalar (see below); with NEON: not measured yet |
+| Raspberry Pi 4 (32-bit OS, 1.8 GHz) | 7.1 ms | 1.67 ms (network 1.28, frontend 0.38, decoder 0.01) |
 
 The laptop numbers were taken on battery in its power-saving profile (the core runs at well under 1 GHz then), so
 they compare Python and native on one machine and say little about another one.
@@ -93,8 +93,13 @@ so any vector code that is still split up shows as a warning during `make`.
 `bench` and `run` print what the binary was built for, e.g. `native (C++, ARMv7 NEON)`; a build that would be
 slow says so there. `bench` also prints the time per frame of frontend, network and decoder.
 
-First Pi 4 measurement with NEON (32-bit OS, 1.8 GHz, `taskset -c 3`): 3.5 ms per frame, so `--hop auto` picks
-hop 512 (33 % of one core). Hop 256 needs the mean under 45 % of 5.33 ms, about 2.4 ms.
+Pi 4 (32-bit OS, 1.8 GHz, `taskset -c 3`, patch stopped), mean time per frame:
+
+| build | per frame | hop 256 |
+|---|---|---|
+| vector code compiled as scalar (no `-funsafe-math-optimizations`) | 11.3 ms | 213 % |
+| NEON, generic vector code | 3.5 ms | 66 % (auto picks hop 512) |
+| NEON, lane kernel for the network | 1.67 ms | 31 %, p99 35 % (auto picks hop 256) |
 
 The convolution kernel on 32-bit ARM is written with NEON intrinsics: ARMv7 NEON has no fused multiply-add by a
 lane, so from the generic vector code GCC copies each weight into a full register before every multiply-add.
