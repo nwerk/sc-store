@@ -61,16 +61,24 @@ fi
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
-# Function to kill processes by name
-kill_processes() {
-    local process_name="$1"
-    if pgrep -x "$process_name" > /dev/null; then
-        echo "Killing all instances of $process_name..."
-        pkill -x "$process_name"
-        echo "$process_name terminated."
-    else
-        echo "No running instances of $process_name found."
-    fi
+# Stops every process with this exact name. One started by another user (the pisound button, a manual sudo) cannot
+# be killed by a plain pkill; then it is tried with sudo -n (no password prompt), and SIGKILL if SIGTERM was not
+# enough. Returns 1, with a message naming the owner, if the process is still there: a second patch must not start
+# next to it (it would not get the OSC port and the audio interface).
+stop_process() {
+    local name="$1" i
+    pgrep -x "$name" > /dev/null || return 0
+    echo "Stopping $name ($(ps -o user=,pid= -C "$name" | awk '{printf "%s%s pid %s", (NR > 1 ? ", " : ""), $1, $2}'))..."
+    pkill -x "$name" 2>/dev/null || sudo -n pkill -x "$name" 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -x "$name" > /dev/null || return 0
+        sleep 0.5
+    done
+    pkill -9 -x "$name" 2>/dev/null || sudo -n pkill -9 -x "$name" 2>/dev/null || true
+    sleep 0.5
+    pgrep -x "$name" > /dev/null || return 0
+    echo "Error: cannot stop $name ($(ps -o user=,pid= -C "$name" | awk '{printf "%s%s pid %s", (NR > 1 ? ", " : ""), $1, $2}')); it belongs to another user. Stop it by hand: sudo pkill -x $name"
+    return 1
 }
 
 # ---- CPU (Pi) ----
@@ -230,14 +238,23 @@ else
 fi
 
 # 1. Kill all SuperCollider instances (another sclang would take port 57120, which the tablet sends to)
-kill_processes "sclang"
-kill_processes "scsynth"
-# A leftover polyphonic pitch tracker normally exits together with sclang; make sure
-pkill -f "polytracker run" 2>/dev/null || true
+stop_process sclang || exit 1
+stop_process scsynth || exit 1
+# scsynth keeps its buses in a shared memory segment named after its port. One left by an scsynth of another user
+# (e.g. root) makes the next scsynth fail with "Exception in World_New: Permission denied". No scsynth runs now,
+# so whatever is there is stale.
+for shm in /dev/shm/SuperColliderServer_*; do
+    [[ -e "$shm" ]] || continue
+    echo "Removing stale scsynth shared memory $shm (owner: $(stat -c %U "$shm"))."
+    rm -f "$shm" 2>/dev/null || sudo -n rm -f "$shm" 2>/dev/null || \
+        echo "Error: cannot remove $shm; scsynth will not start. Remove it by hand: sudo rm $shm"
+done
+# A leftover polyphonic pitch tracker normally exits together with sclang; make sure ([p]: see boot-sc.sh)
+pkill -f '[p]olytracker run' 2>/dev/null || sudo -n pkill -f '[p]olytracker run' 2>/dev/null || true
 
 # 2. Kill all Pure Data (Pd) instances (Pi only: on the laptop Pd may be in use for something else)
 if [[ "$ON_PI" -eq 1 ]]; then
-    kill_processes "pd"
+    stop_process pd || true   # Pd is not in our way, only in the way of the CPU
 fi
 
 # Optional: Wait a moment to ensure processes have terminated

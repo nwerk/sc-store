@@ -28,15 +28,33 @@ if [[ "$_SERVICE_PID" != "0" && "$_SERVICE_PID" != "$$" ]]; then
     sleep 2
 fi
 
+# Stops every process with this exact name. One started by another user (the pisound button, a manual sudo) cannot
+# be killed by a plain pkill; then it is tried with sudo -n (no password prompt), and SIGKILL if SIGTERM was not
+# enough. Returns 1, with a message naming the owner, if the process is still there: a second patch must not start
+# next to it (it would not get the OSC port and the audio interface).
+stop_process() {
+    local name="$1" i
+    pgrep -x "$name" > /dev/null || return 0
+    echo "[boot-sc] Stopping $name ($(ps -o user=,pid= -C "$name" | awk '{printf "%s%s pid %s", (NR > 1 ? ", " : ""), $1, $2}'))..."
+    pkill -x "$name" 2>/dev/null || sudo -n pkill -x "$name" 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -x "$name" > /dev/null || return 0
+        sleep 0.5
+    done
+    pkill -9 -x "$name" 2>/dev/null || sudo -n pkill -9 -x "$name" 2>/dev/null || true
+    sleep 0.5
+    pgrep -x "$name" > /dev/null || return 0
+    echo "[boot-sc] ERROR: cannot stop $name ($(ps -o user=,pid= -C "$name" | awk '{printf "%s%s pid %s", (NR > 1 ? ", " : ""), $1, $2}')); it belongs to another user. Stop it by hand: sudo pkill -x $name"
+    return 1
+}
+
 # ---- 1. Kill any running SuperCollider instances ----
+# (a failure here used to end the script under set -e: sc-boot.service then restarted it every 10 s, for ever)
 for proc in sclang scsynth; do
-    if pgrep -x "$proc" > /dev/null; then
-        echo "[boot-sc] Killing existing $proc..."
-        pkill -x "$proc"
-        sleep 1
-    fi
+    stop_process "$proc" || exit 1
 done
-pkill -f "polytracker run" 2>/dev/null || true  # leftover pitch tracker, if any
+# leftover pitch tracker, if any ([p]: the pattern must not match the command line of sudo itself)
+pkill -f '[p]olytracker run' 2>/dev/null || sudo -n pkill -f '[p]olytracker run' 2>/dev/null || true
 
 # ---- 2. Checkout requested branch (power-loss safe) ----
 # The Pi can lose power at any moment, also in the middle of a git command. That leaves two kinds of damage:
