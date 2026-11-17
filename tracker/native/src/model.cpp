@@ -4,6 +4,16 @@
 
 #include <cstdio>
 #include <cstring>
+
+// 32-bit ARM: the convolution kernel is written with NEON intrinsics (see conv_tile8). PT_NEON_SHIM builds the
+// same kernel on x86 with tests/neon_shim.h, for checking it there.
+#if defined(PT_NEON_SHIM)
+#include "../tests/neon_shim.h"
+#define PT_ARM32_KERNEL 1
+#elif defined(__arm__) && defined(__ARM_NEON) && !defined(__aarch64__)
+#include <arm_neon.h>
+#define PT_ARM32_KERNEL 1
+#endif
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -25,7 +35,7 @@ constexpr int RB = 8;
 
 // Positions per tile. 8 floats are one AVX register or two NEON registers (AArch64 has 32 of them); elsewhere
 // (32-bit ARM, SSE: 16 registers) eight 4-float accumulators are what fits.
-#if defined(__AVX__) || defined(__aarch64__)
+#if (defined(__AVX__) || defined(__aarch64__)) && !defined(PT_NEON_SHIM)
 typedef simd::v8 vt;
 #else
 typedef simd::v4 vt;
@@ -37,6 +47,45 @@ struct Rows {
     int outer, step, inner, stride;
 };
 
+#if defined(PT_ARM32_KERNEL)
+// 32-bit ARM, 8 outputs x 4 positions. NEON there has no fused multiply-add by a lane, and from the generic
+// vector code above GCC builds `w[r] * v` by first copying the weight into all four lanes of a register: one
+// extra instruction per multiply-add. vmla.f32 by lane (vmlaq_lane_f32) takes the weight straight from a lane:
+// per step one load of 4 inputs, two loads of the 8 weights, 8 multiply-adds; 11 of the 16 registers.
+// lp is a multiple of 4 here (LB == 4 on 32-bit ARM).
+void conv_tile8(const float* wp, const float* b, Rows x, float* out, int L, int lp) {
+    static_assert(LB == 4, "the 32-bit ARM kernel works on 4 positions");
+    for (int l0 = 0; l0 < lp; l0 += 4) {
+        float32x4_t a0 = vdupq_n_f32(b[0]), a1 = vdupq_n_f32(b[1]), a2 = vdupq_n_f32(b[2]), a3 = vdupq_n_f32(b[3]);
+        float32x4_t a4 = vdupq_n_f32(b[4]), a5 = vdupq_n_f32(b[5]), a6 = vdupq_n_f32(b[6]), a7 = vdupq_n_f32(b[7]);
+        const float* w = wp;
+        for (int t = 0; t < x.outer; ++t) {
+            const float* c = x.base + t * x.step + l0;
+            for (int j = 0; j < x.inner; ++j, c += x.stride, w += RB) {
+                const float32x4_t v = vld1q_f32(c);
+                const float32x4_t w03 = vld1q_f32(w), w47 = vld1q_f32(w + 4);
+                const float32x2_t w01 = vget_low_f32(w03), w23 = vget_high_f32(w03);
+                const float32x2_t w45 = vget_low_f32(w47), w67 = vget_high_f32(w47);
+                a0 = vmlaq_lane_f32(a0, v, w01, 0); a1 = vmlaq_lane_f32(a1, v, w01, 1);
+                a2 = vmlaq_lane_f32(a2, v, w23, 0); a3 = vmlaq_lane_f32(a3, v, w23, 1);
+                a4 = vmlaq_lane_f32(a4, v, w45, 0); a5 = vmlaq_lane_f32(a5, v, w45, 1);
+                a6 = vmlaq_lane_f32(a6, v, w67, 0); a7 = vmlaq_lane_f32(a7, v, w67, 1);
+            }
+        }
+        const float32x4_t acc[RB] = {a0, a1, a2, a3, a4, a5, a6, a7};
+        const int n = L - l0 < 4 ? L - l0 : 4;
+        for (int r = 0; r < RB; ++r) {
+            if (n == 4) {
+                vst1q_f32(out + r * L + l0, acc[r]);
+            } else {
+                float tmp[4];
+                vst1q_f32(tmp, acc[r]);
+                for (int i = 0; i < n; ++i) out[r * L + l0 + i] = tmp[i];
+            }
+        }
+    }
+}
+#else
 void conv_tile8(const float* wp, const float* b, Rows x, float* out, int L, int lp) {
     for (int l0 = 0; l0 < lp; l0 += LB) {
         vt a0 = b[0] + vt{}, a1 = b[1] + vt{}, a2 = b[2] + vt{}, a3 = b[3] + vt{};
@@ -59,6 +108,8 @@ void conv_tile8(const float* wp, const float* b, Rows x, float* out, int L, int 
     }
 }
 
+#endif
+
 // rows that do not fill a block of 8 (the two output heads)
 void conv_rows(const float* w, const float* b, Rows x, float* out, int rows, int L) {
     for (int r = 0; r < rows; ++r) {
@@ -77,7 +128,9 @@ void conv_rows(const float* w, const float* b, Rows x, float* out, int rows, int
 }  // namespace
 
 const char* simd_info() {
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(PT_NEON_SHIM)
+    return "x86-64 running the 32-bit ARM kernel through tests/neon_shim.h (correctness check only)";
+#elif defined(__AVX2__) && defined(__FMA__)
     return "x86-64 AVX2 + FMA";
 #elif defined(__AVX__)
     return "x86-64 AVX";

@@ -140,7 +140,8 @@ std::vector<float> bench_signal(int sr, double seconds) {
 }
 
 // wall-clock milliseconds per frame of Tracker::process
-std::vector<double> measure(Tracker& tr, double seconds, int warmup = 20) {
+// stages: if set, the mean time per frame of frontend / network / decoder (ms) after the warmup
+std::vector<double> measure(Tracker& tr, double seconds, int warmup = 20, double* stages = nullptr) {
     const int hop = tr.cfg.hop, H = tr.history(), sr = tr.cfg.sample_rate;
     std::vector<float> x = bench_signal(sr, seconds);
     std::vector<float> padded(H, 0.0f);
@@ -151,10 +152,20 @@ std::vector<double> measure(Tracker& tr, double seconds, int warmup = 20) {
     for (size_t i = 0; i < frames; ++i) {
         const size_t end = (i + 1) * hop;
         ev.clear();
+        if (int(i) == warmup && stages) {
+            tr.stage = Tracker::StageTimes{};
+            tr.timing = true;
+        }
         const double t0 = now_s();
         tr.process(&padded[end], double(end) / sr, ev);
         if (int(i) >= warmup) ms.push_back((now_s() - t0) * 1e3);
     }
+    if (stages && tr.stage.frames) {
+        stages[0] = 1e3 * tr.stage.frontend / tr.stage.frames;
+        stages[1] = 1e3 * tr.stage.network / tr.stage.frames;
+        stages[2] = 1e3 * tr.stage.decoder / tr.stage.frames;
+    }
+    tr.timing = false;
     tr.reset();
     return ms;
 }
@@ -648,7 +659,9 @@ int cmd_bench(const Args& a) {
     std::printf("native (C++, %s)\n", simd_info());
     for (int hop : hops) {
         Tracker tr(net, params, sr, hop);
-        std::printf("%s\n", summary(tr, stats(measure(tr, seconds))).c_str());
+        double st[3] = {0, 0, 0};
+        std::printf("%s\n", summary(tr, stats(measure(tr, seconds, 20, st))).c_str());
+        std::printf("    frontend %.3f ms  network %.3f ms  decoder %.3f ms\n", st[0], st[1], st[2]);
     }
     std::printf("(six voices sounding; `run --hop auto` picks the smallest hop with mean <= 45%% and p99 <= 80%% of it)\n");
     return 0;

@@ -91,7 +91,20 @@ than numpy. The Makefile therefore compiles `model.cpp` and `frontend.cpp` with 
 so any vector code that is still split up shows as a warning during `make`.
 
 `bench` and `run` print what the binary was built for, e.g. `native (C++, ARMv7 NEON)`; a build that would be
-slow says so there. On x86 the same flag changes only rounding: `compare.py` still matches (features within
+slow says so there. `bench` also prints the time per frame of frontend, network and decoder.
+
+First Pi 4 measurement with NEON (32-bit OS, 1.8 GHz, `taskset -c 3`): 3.5 ms per frame, so `--hop auto` picks
+hop 512 (33 % of one core). Hop 256 needs the mean under 45 % of 5.33 ms, about 2.4 ms.
+
+The convolution kernel on 32-bit ARM is written with NEON intrinsics: ARMv7 NEON has no fused multiply-add by a
+lane, so from the generic vector code GCC copies each weight into a full register before every multiply-add.
+`vmlaq_lane_f32` takes the weight straight from a lane. The kernel can be checked for correctness on x86, where
+`tests/neon_shim.h` provides those intrinsics:
+
+```bash
+make clean && make SIMDFLAGS=-DPT_NEON_SHIM && cd .. && .venv/bin/python native/tests/compare.py
+make -C native clean && make -C native     # back to the normal build
+``` On x86 the same flag changes only rounding: `compare.py` still matches (features within
 7e-5, probabilities within 3e-6).
 
 ## Realtime priority
