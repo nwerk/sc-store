@@ -238,7 +238,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	c[\velBus] = Bus.control(server, 2);  // level (dBFS), brightness (Hz)
 	c[\outBus] = Bus.audio(server, 2);
 	c[\group] = Group(o[\target] ? server.defaultGroup, \addToTail);
-	c[\voiceGroup] = Group(c[\group], \addToHead);
+	c[\voiceGroup] = ParGroup(c[\group], \addToHead);  // the strings are independent: several cores with supernova
 	c[\velSynth] = Synth(\cembaloVel, [\in, o[\inBus], \out, c[\velBus]], c[\group], \addToHead);
 	if(o[\attack] == \onset) {  // after \cembaloVel, whose bus it reads in the same block
 		c[\attackSynth] = Synth(\cembaloAttacks, [\out, c[\outBus], \in, o[\inBus], \velBus, c[\velBus]]

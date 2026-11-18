@@ -56,7 +56,7 @@ stop_process() {
 
 # ---- 1. Kill any running SuperCollider instances ----
 # (a failure here used to end the script under set -e: sc-boot.service then restarted it every 10 s, for ever)
-for proc in sclang scsynth; do
+for proc in sclang scsynth supernova; do
     stop_process "$proc" || exit 1
 done
 # leftover pitch tracker, if any ([p]: the pattern must not match the command line of sudo itself)

@@ -125,15 +125,19 @@ s.waitForBoot {
 
 	// ---- Groups (ordered for signal flow) ----
 	// The tape synth, the cembalo and the pad run before the recorder, so they can be fed into the grain buffer.
+	// They do not read each other's output, so they sit side by side in a ParGroup: with supernova (SC_SERVER=supernova)
+	// they are computed on different CPU cores at the same time; scsynth treats a ParGroup like a Group. The same
+	// for the grain voices (~granGrp) and the cembalo's strings (synths/cembalo.scd).
 	~micGrp     = Group.new;
 	~tartiniGrp = Group.after(~micGrp);
-	~tapeGrp    = Group.after(~tartiniGrp);
-	~cembaloGrp = Group.after(~tapeGrp);
-	~padGrp     = Group.after(~cembaloGrp);
-	~srcGrp     = Group.after(~padGrp);
+	~synthsPar  = ParGroup.after(~tartiniGrp);
+	~tapeGrp    = Group(~synthsPar);
+	~cembaloGrp = Group(~synthsPar, \addToTail);
+	~padGrp     = Group(~synthsPar, \addToTail);
+	~srcGrp     = Group.after(~synthsPar);
 	~ptrGrp     = Group.after(~srcGrp);
 	~recGrp     = Group.after(~ptrGrp);
-	~granGrp    = Group.after(~recGrp);
+	~granGrp    = ParGroup.after(~recGrp);    // \gran voices only (the main one and the XY voices), all independent
 	~fftGrp     = Group.after(~granGrp);
 	~masterGrp  = Group.after(~fftGrp);
 	s.sync;

@@ -51,6 +51,8 @@ fi
 if [[ "$ON_PI" -eq 1 ]]; then
     : "${CPU_GOVERNOR=performance}"     # Pi: CPU frequency governor while the patch runs; empty = leave it alone
 fi
+: "${SC_SERVER:=scsynth}"              # scsynth (one core) or supernova (several cores; package supercollider-supernova)
+export SC_SERVER                        # read by config/serversetup.scd
 export TOUCHOSC_IP                      # read by osc/oscconfig_multi.scd
 export UI_HTTP_PORT                     # read by osc/ui_version.scd (for its hints)
 # ============================================================
@@ -226,6 +228,7 @@ cleanup() {
     if [[ "$ON_PI" -eq 0 ]]; then
         # sclang does not quit its server when it is killed; on SIGTERM / SIGHUP it would keep playing
         pkill -x scsynth 2>/dev/null || true
+        pkill -x supernova 2>/dev/null || true
         pkill -f "polytracker run" 2>/dev/null || true
     fi
     stop_ui_server
@@ -244,6 +247,7 @@ fi
 # 1. Kill all SuperCollider instances (another sclang would take port 57120, which the tablet sends to)
 stop_process sclang || exit 1
 stop_process scsynth || exit 1
+stop_process supernova || exit 1
 # scsynth keeps its buses in a shared memory segment named after its port. One left by an scsynth of another user
 # (e.g. root) makes the next scsynth fail with "Exception in World_New: Permission denied". No scsynth runs now,
 # so whatever is there is stale.
