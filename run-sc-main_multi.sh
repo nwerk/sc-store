@@ -36,6 +36,10 @@ fi
 # ============================================================
 if [[ "$ON_PI" -eq 1 ]]; then
     : "${TOUCHOSC_IP:=172.24.1.107}"    # tablet on the Pi's hotspot
+    # supernova computes tape, cembalo, pad and the cembalo strings on 3 cores. Measured on the Pi 4 (JACK 256, all
+    # four chains on, cembalo played): scsynth 95-100 % and hundreds of xruns, supernova peak 93 % and none.
+    # Falls back to scsynth if supernova is not installed (package supercollider-supernova).
+    : "${SC_SERVER:=supernova}"
 else
     : "${TOUCHOSC_IP:=192.168.0.110}"   # tablet on the home network
     : "${JACK_DEVICE:=}"                # ALSA device, e.g. hw:USB; empty = Focusrite if connected, else hw:0
@@ -51,7 +55,8 @@ fi
 if [[ "$ON_PI" -eq 1 ]]; then
     : "${CPU_GOVERNOR=performance}"     # Pi: CPU frequency governor while the patch runs; empty = leave it alone
 fi
-: "${SC_SERVER:=scsynth}"              # scsynth (one core) or supernova (several cores; package supercollider-supernova)
+: "${SC_SERVER:=scsynth}"              # laptop: scsynth (one core; faster there, supernova's thread sync costs more
+                                        # than it gains on a fast CPU); supernova = several cores
 export SC_SERVER                        # read by config/serversetup.scd
 export TOUCHOSC_IP                      # read by osc/oscconfig_multi.scd
 export UI_HTTP_PORT                     # read by osc/ui_version.scd (for its hints)
