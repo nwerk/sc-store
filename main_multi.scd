@@ -3,6 +3,8 @@ Server.killAll;
 
 //////// IMPORTS ///////////////////
 ~basePath = PathName(thisProcess.nowExecutingPath).pathOnly;
+// the Pi is recognised by its pisound installation, as in run-sc-main_multi.sh
+~onPi = File.exists("/usr/local/pisound/scripts/common/common.sh");
 
 // Platform-specific audio server config
 thisProcess.interpreter.executeFile(~basePath ++ "config/serversetup.scd");
@@ -255,7 +257,10 @@ s.waitForBoot {
 	~cembaloNorm = ();  // current normalised fader values (language-side mirror of CC 100–109)
 
 	~cembalo = ~cembaloNew.(s, ~tartini, (
-		inBus: ~micBus, out: ~cembaloOutBus, target: ~cembaloGrp, maxVoices: 12
+		inBus: ~micBus, out: ~cembaloOutBus, target: ~cembaloGrp,
+		// Pi 4: fewer ringing strings (each costs about 4-5 % of scsynth there); on both, notes played while scsynth
+		// is above 80 % damp the oldest strings (see synths/cembalo.scd)
+		maxVoices: if (~onPi) { 8 } { 12 }, cpuLimit: 80
 	));
 
 	// Set one cembalo parameter from a normalised 0..1 value: cembalo + CC slot (presets) + TouchOSC feedback.

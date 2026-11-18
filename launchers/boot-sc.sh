@@ -24,8 +24,13 @@ BRANCH="${1:-prod}"
 _SERVICE_PID=$(systemctl show sc-boot.service --property=MainPID --value 2>/dev/null || echo "0")
 if [[ "$_SERVICE_PID" != "0" && "$_SERVICE_PID" != "$$" ]]; then
     echo "[boot-sc] Stopping sc-boot.service (PID: $_SERVICE_PID)..."
-    # as root (old button scripts) directly, as `patch` through sudo -n (no password prompt)
-    systemctl stop sc-boot.service 2>/dev/null || sudo -n systemctl stop sc-boot.service || true
+    # as root directly; as `patch` through sudo -n. A plain `systemctl stop` as `patch` would make polkit ask for a
+    # password in the terminal (and fail without one); --no-ask-password: fail quietly instead
+    if [[ "$(id -u)" -eq 0 ]]; then
+        systemctl stop sc-boot.service || true
+    elif ! sudo -n systemctl stop sc-boot.service 2>/dev/null && ! systemctl --no-ask-password stop sc-boot.service 2>/dev/null; then
+        echo "[boot-sc] Warning: cannot stop sc-boot.service (no passwordless sudo); it may restart the patch. Stop it with: sudo systemctl stop sc-boot.service"
+    fi
     sleep 2
 fi
 

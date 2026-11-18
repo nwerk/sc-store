@@ -216,7 +216,11 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 //   .quit           remove everything (not .free: Object:free would silently do nothing)
 ~cembaloNew = { |server, tracker, opts|
 	var c = Environment.new(know: true);
-	var o = (inBus: 0, out: 0, target: nil, maxVoices: 12, volume: 1.0, enabled: false, attack: \onset);
+	// maxVoices: ringing strings at most. cpuLimit: scsynth load (%, avgCPU) above which every new note damps one
+	// string more than it adds, until the load is back below it (at least 2 stay); nil = off. A ringing string is
+	// the expensive part of the cembalo (on a Pi 4 about 4-5 % of scsynth's time each): played fast, 12 of them
+	// took scsynth to 98 % and into dropouts.
+	var o = (inBus: 0, out: 0, target: nil, maxVoices: 12, cpuLimit: 80, volume: 1.0, enabled: false, attack: \onset);
 	var prevOnNoteOn;
 	opts !? { opts.keysValuesDo { |k, v| o[k] = v } };
 
@@ -243,6 +247,9 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	c[\outSynth] = Synth(\cembaloOut, [\in, c[\outBus], \out, o[\out], \amp, 0,
 		\revMix, c[\outParams][\revMix], \room, c[\outParams][\room]], c[\group], \addToTail);
 
+	// scsynth's load in % (from its /status replies, updated about every 0.7 s)
+	c[\cpuLoad] = { |self| server.avgCPU ? 0 };
+
 	// Damp a voice. It may have ended on the server a moment ago (rung out, see DetectSilence above) while its
 	// /n_end is still on the way to sclang; ['/error', -1] silences the "Node not found" of this one message only.
 	c[\choke] = { |self, voice|
@@ -250,13 +257,17 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	};
 
 	c[\noteOn] = { |self, midi, freq|
-		var syn, old, args;
+		var syn, old, args, limit;
 		if(self[\enabled]) {
 			// re-plucking a sounding pitch damps the old string; too many voices: damp the oldest
 			old = self[\byMidi][midi];
 			old !? { self.choke(old); self[\voices].remove(old) };
-			while { self[\voices].size >= self[\opts][\maxVoices] } {
-				self.choke(self[\voices].removeAt(0));  // its byMidi entry is cleared when it frees
+			limit = self[\opts][\maxVoices];
+			if(self[\opts][\cpuLimit].notNil and: { self[\cpuLoad].value(self) > self[\opts][\cpuLimit] }) {
+				limit = (self[\voices].size - 1).clip(2, limit);  // overloaded: one string fewer than now, per new note
+			};
+			while { self[\voices].size >= limit } {
+				self.choke(self[\voices].removeAt(0));  // oldest first; its byMidi entry is cleared when it frees
 			};
 			// a voice is a group holding the string and (attack: \note) its attack (see the top of this file); one
 			// bundle, so both start in the same control block. attack: \onset: the attack has usually started
