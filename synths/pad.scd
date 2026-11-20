@@ -97,6 +97,97 @@ SynthDef(\pad, { |ccBus=0, polyBus=0, out=0, freqLag=0.05, voiceBalance=0.3, amp
 	// is matched to the cembalo; the fader's top is 6 dB above that
 	Out.ar(out, sig * volume.squared * 0.7);
 }).add;
+// ---- \pad split into voices that sleep while silent (what main_multi.scd plays) ----
+// Like \apePoly (synths/tapeemulate.scd): \pad computes its 6 voices all the time. Here, in one group (~padNew):
+//   \padCtl    faders, tracker buses, envelopes, voice weighting, the shared wow / flutter and every voice's pitch
+//              (with its scoop); pauses every voice whose level is below sleepDb while its gate is closed
+//   \padVoice  one voice (two detuned saws + pulse, panning), x 6, in a ParGroup
+//   \padPost   sum, equal-power normalisation, filters, saturation, hiss, warble, chorus, reverb, volume
+// Same computation as \pad; the per-voice drift and PWM are random in both (their seeds differ, the sound not).
+~padVoices = 6;
+~padCtlSize = 5 + (3 * ~padVoices);  // detune, wave, tape, norm, total, pitch x n, freq x n, level x n
+
+SynthDef(\padCtl, { |ccBus=0, polyBus=0, freqLag=0.05, voiceBalance=0.3, ampRangeDb=60, ctl=0,
+	voiceIds=#[-1, -1, -1, -1, -1, -1], sleep=1, sleepDb= -100|
+	var n = ~padVoices, header = 4;
+	var cc = { |key| In.kr(ccBus + ~busNames[("pad_" ++ key).asSymbol].index).lag(0.05) };
+	var wobble = cc.(\wobble), rate = cc.(\wobbleRate).linexp(0, 1, 0.15, 6);
+	var detune = cc.(\detune).linexp(0, 1, 2, 40), wave = cc.(\wave);
+	var atk = cc.(\attack).linexp(0, 1, 0.005, 3), rel = cc.(\release).linexp(0, 1, 0.1, 10);
+	var alive, vFreq, vAmp, vGate, noteStart, freq, gateEnv, ampHeld, ampMax, weight, level, norm, total;
+	var depth, wow, flutter, tape, scoop, pitch;
+	alive = Sweep.kr(Changed.kr(In.kr(polyBus + 3)), 1) < 0.5;
+	vFreq = In.kr(polyBus + header, n);
+	vAmp  = In.kr(polyBus + header + n, n);
+	vGate = In.kr(polyBus + header + (2 * n), n) * alive;
+	noteStart = (vGate - Delay1.kr(vGate)) > 0;
+	freq = Lag.kr(Gate.kr(vFreq, vFreq > 20).max(20), freqLag);
+	gateEnv = Lag2UD.kr(vGate, atk, rel);
+	ampHeld = Gate.kr(vAmp, vGate);
+	ampMax = (ampHeld * vGate).reduce(\max);
+	weight = ((ampHeld - ampMax) * ampRangeDb * voiceBalance.clip(0, 1)).dbamp.min(1);
+	level = gateEnv * weight;
+	norm = level.squared.sum.max(1).sqrt.reciprocal;
+	total = level.sum.min(1);
+	depth = wobble.squared;
+	wow = (SinOsc.kr(rate * LFNoise1.kr(0.23).range(0.7, 1.3)) * 0.6) + (LFNoise2.kr(rate * 0.4) * 0.8);
+	flutter = LFNoise2.kr(rate * 7) * SinOsc.kr(rate * 2.3).range(0.3, 1);
+	tape = ((wow * 45) + (flutter * 7)) * depth;
+	scoop = Decay.kr(noteStart, 0.4) * (-35 * depth);
+	pitch = n.collect { |i| freq[i] * ((tape + scoop[i]) / 100).midiratio };
+	Out.kr(ctl, [detune, wave, tape, norm, total] ++ pitch ++ freq ++ level);
+	n.do { |i| Pause.kr(((vGate[i] > 0) + (level[i] > sleepDb.dbamp) + (1 - sleep)) > 0, voiceIds[i]) };
+}).add;
+
+SynthDef(\padVoice, { |ctl=0, index=0, sum=0|
+	var n = ~padVoices;
+	// its own random generator: a sleeping voice draws no random numbers, and must not change the random drift
+	// of the other synths (they all share generator 0 otherwise)
+	var rid = RandID.ir(index + 1);
+	var detune = In.kr(ctl), wave = In.kr(ctl + 1);
+	var f = In.kr(ctl + 5 + index), freq = In.kr(ctl + 5 + n + index), level = In.kr(ctl + 5 + (2 * n) + index);
+	var d = [-0.5, 0.5].collect { |s| ((s * detune) + (LFNoise2.kr(Rand(0.07, 0.25)) * detune * 0.3)) / 100 };
+	var saws = Saw.ar(f * d.midiratio);  // left, right
+	var pulse = Pulse.ar(f, LFTri.kr(Rand(0.08, 0.2), Rand(0, 4)).range(0.3, 0.7)) * 0.9;
+	var mix = (saws * (1 - (wave * 0.8))) + (pulse * wave);
+	Out.ar(sum, Balance2.ar(mix[0], mix[1], freq.cpsmidi.linlin(40, 84, -0.3, 0.3), level));
+}).add;
+
+SynthDef(\padPost, { |ccBus=0, ctl=0, sum=0, out=0|
+	var cc = { |key| In.kr(ccBus + ~busNames[("pad_" ++ key).asSymbol].index).lag(0.05) };
+	var volume = cc.(\volume), wobble = cc.(\wobble), rate = cc.(\wobbleRate).linexp(0, 1, 0.15, 6);
+	var tone = cc.(\tone).linexp(0, 1, 250, 9000), age = cc.(\age), reverb = cc.(\reverb);
+	var tape = In.kr(ctl + 2), norm = In.kr(ctl + 3), total = In.kr(ctl + 4);
+	var depth = wobble.squared, sig, cutoff, drive, hiss, warble, chorus;
+	sig = In.ar(sum, 2) * norm * 0.35;
+	cutoff = (tone * (1 - (age * 0.45)) * LFNoise2.kr(0.15).range(0.85, 1.18) * (tape / 300).midiratio).clip(120, 12000);
+	sig = LPF.ar(RLPF.ar(sig, cutoff, 0.55), cutoff * 1.4);
+	drive = 1 + (age * 5);
+	sig = (sig * drive).tanh / (drive ** 0.6);
+	hiss = LPF.ar(HPF.ar({ PinkNoise.ar } ! 2, 400), 5500) * age.squared * 0.05 * Lag.kr(total, 0.3);
+	warble = 1 - (age * 0.35 * LFNoise2.kr(rate * 1.7).range(0, 1) * LFNoise1.kr(0.5).range(0.3, 1));
+	sig = (sig + hiss) * warble;
+	chorus = [0.011, 0.014] + ([SinOsc.kr(rate * 0.83, 0), SinOsc.kr(rate * 0.71, 1.9)] * 0.0035 * depth.sqrt)
+		+ (LFNoise2.kr(rate * 3 ! 2) * 0.0006 * depth);
+	sig = (sig * 0.6) + (DelayC.ar(sig, 0.03, chorus) * 0.6);
+	sig = FreeVerb2.ar(sig[0], sig[1], reverb, 0.88, 0.55);
+	sig = LeakDC.ar(sig).tanh;
+	Out.ar(out, sig * volume.squared * 0.7);
+}).add;
+
+// ~padNew.(server, args, target, addAction) -> a Group playing \pad with sleeping voices (args as for \pad).
+~padNew = { |server, args, target, addAction = \addToTail|
+	var a = (), g, vg, voices, ctlBus, sumBus;
+	args.pairsDo { |k, v| a[k] = v };
+	ctlBus = Bus.control(server, ~padCtlSize);
+	sumBus = Bus.audio(server, 2);
+	g = Group(target, addAction);
+	vg = ParGroup(g);
+	voices = ~padVoices.collect { |i| Synth(\padVoice, [\ctl, ctlBus, \index, i, \sum, sumBus], vg, \addToTail) };
+	Synth(\padCtl, args ++ [\ctl, ctlBus, \voiceIds, voices.collect(_.nodeID)], g, \addToHead);
+	Synth(\padPost, [\ccBus, a[\ccBus] ? 0, \ctl, ctlBus, \sum, sumBus, \out, a[\out] ? 0], g, \addToTail);
+	g
+};
 
 "SynthDef \\pad is defined and added.".postln;
 )

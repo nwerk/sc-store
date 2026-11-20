@@ -232,9 +232,11 @@ s.waitForBoot {
 	// \apePoly = \ape with one oscillator per tracked note (up to 6), so chords are played as chords.
 	// It reads badness/wavemix/etc. from CC slots 90–96 (baked in at compile time), like \ape, and the pluck amount
 	// (picking position, classes/pluckpos.scd) from slot 97.
+	// ~ape is a group: \apePoly split into a control synth, 6 voices that sleep while silent, and the output stage
+	// (synths/tapeemulate.scd, ~apePolyNew); .set and .run act on all of them, as on the single synth before.
 	// Tweak: ~ape.set(\voiceBalance, 0)  all notes equally loud (1 = follow the guitar's note levels)
 	//        ~ape.set(\rel, 0.5)          longer note release (s);  \atk attack (s);  \freqLag pitch smoothing (s)
-	~ape = Synth(\apePoly, [
+	~ape = ~apePolyNew.(s, [
 		\ccBus,   ~ccBuses,
 		\polyBus, ~tartini[\block].index,
 		\vol,     ~ampBus.index,
@@ -311,9 +313,10 @@ s.waitForBoot {
 	// ---- Pad chain ----
 	// \pad (synths/pad.scd): one pad voice per tracked note. It reads its faders from CC slots 67–76
 	// (/pad/*), its own volume included, so presets and the generic fader handler work without extra code.
+	// ~pad is a group like ~ape: control synth, 6 sleeping voices, output stage (synths/pad.scd, ~padNew).
 	// Tweak: ~pad.set(\voiceBalance, 1)  follow the guitar's note levels (0 = all notes equally loud)
 	//        ~pad.set(\freqLag, 0.2)     slower glide between pitches (s)
-	~pad = Synth(\pad, [
+	~pad = ~padNew.(s, [
 		\ccBus,   ~ccBuses,
 		\polyBus, ~tartini[\block].index,
 		\out,     ~padOutBus,
