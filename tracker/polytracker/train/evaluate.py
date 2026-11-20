@@ -73,10 +73,12 @@ def evaluate_recordings(tracker: Tracker, recs, tol: float = 0.05, verbose: bool
     cfg = tracker.cfg
     f_tp = f_fp = f_fn = 0
     o_tp = o_fp = o_fn = 0
+    o1_tp = o1_fp = o1_fn = 0
     deltas_all = []
     proc_ms = []
     err_ref, err_nom = [], []
     n_poly = []
+    moves = []  # ms between a note's start and each correction of its pitch
     for r in recs:
         t0 = time.perf_counter()
         run = tracker.decode(cache[r.name]) if cache is not None else tracker.run_full(r.audio)
@@ -92,7 +94,9 @@ def evaluate_recordings(tracker: Tracker, recs, tol: float = 0.05, verbose: bool
         for i, t in enumerate(times):
             while ev_i < len(events) and events[ev_i].t <= t + 1e-9:
                 e = events[ev_i]
-                state[e.pitch - cfg.pitch_lo] = e.kind == "on"
+                if e.kind == "move":
+                    state[e.prev - cfg.pitch_lo] = False
+                state[e.pitch - cfg.pitch_lo] = e.kind != "off"
                 ev_i += 1
             active[i] = state
         ms = np.clip(np.round(times * ROLL_RATE).astype(int), 0, len(r.roll) - 1)
@@ -100,9 +104,21 @@ def evaluate_recordings(tracker: Tracker, recs, tol: float = 0.05, verbose: bool
         f_tp += int((active & gt).sum()); f_fp += int((active & ~gt).sum()); f_fn += int((~active & gt).sum())
         n_poly.append(gt.sum(1).mean())
 
-        est = [(e.t, e.pitch - cfg.pitch_lo) for e in events if e.kind == "on"]
+        # a moved note is one onset: heard at its start, with the pitch it was corrected to
+        est, first, cur = [], [], {}
+        for e in events:
+            if e.kind == "on":
+                cur[e.voice] = len(est)
+                est.append([e.t, e.pitch - cfg.pitch_lo])
+                first.append((e.t, e.pitch - cfg.pitch_lo))
+            elif e.kind == "move":
+                est[cur[e.voice]][1] = e.pitch - cfg.pitch_lo
+                moves.append((e.t - est[cur[e.voice]][0]) * 1e3)
+        est = [tuple(x) for x in est]
         tp, d = match_onsets(r.onsets, est, tol)
         o_tp += tp; o_fp += len(est) - tp; o_fn += len(r.onsets) - tp
+        tp1, _ = match_onsets(r.onsets, first, tol)  # scored on the pitch heard first, before any move
+        o1_tp += tp1; o1_fp += len(first) - tp1; o1_fn += len(r.onsets) - tp1
         deltas_all += d
         if verbose:
             fp_, fr_, ff_ = prf(f_tp, f_fp, f_fn)
@@ -117,6 +133,8 @@ def evaluate_recordings(tracker: Tracker, recs, tol: float = 0.05, verbose: bool
         "onset_delay_ms_median": float(np.median(d)), "onset_delay_ms_p90": float(np.percentile(d, 90)),
         "onset_delay_ms_p10": float(np.percentile(d, 10)),
         "mean_polyphony": float(np.mean(n_poly)),
+        "notes": o_tp + o_fp, "onset_f1_first_pitch": prf(o1_tp, o1_fp, o1_fn)[2],
+        "moves": len(moves), "move_after_ms_median": float(np.median(moves)) if moves else 0.0,
         "ms_per_frame_offline": float(np.mean(proc_ms)),
     }
     if err_ref and sum(len(e) for e in err_ref):
@@ -144,13 +162,18 @@ def main():
     ap.add_argument("--on", type=float, default=d.on_thresh)
     ap.add_argument("--off", type=float, default=d.off_thresh)
     ap.add_argument("--onset", type=float, default=d.onset_thresh)
+    ap.add_argument("--confirm-ms", type=float, default=d.on_confirm_ms)
+    ap.add_argument("--correct-ms", type=float, default=d.correct_ms)
+    ap.add_argument("--correct-span", type=int, default=d.correct_span)
+    ap.add_argument("--correct-drop", type=float, default=d.correct_drop)
     ap.add_argument("--tol", type=float, default=0.05)
     ap.add_argument("--json", help="write metrics to this file")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
 
     model = PitchNetNP.load(a.model)
-    params = DecoderParams(on_thresh=a.on, off_thresh=a.off, onset_thresh=a.onset)
+    params = DecoderParams(on_thresh=a.on, off_thresh=a.off, onset_thresh=a.onset, on_confirm_ms=a.confirm_ms,
+                           correct_ms=a.correct_ms, correct_span=a.correct_span, correct_drop=a.correct_drop)
     tracker = Tracker(model, params)
     if a.guitarset:
         recs = load_guitarset(a.guitarset, model.cfg, a.split, a.kind, a.limit, contours=True)

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <numeric>
 
@@ -196,18 +197,63 @@ void Decoder::start(int pi, double t, const float* pf, const float* mag, int n_b
     }
     v_freq[v] = f;
     v_amp[v] = amp_of(mag, n_bins, f);
-    ev.push_back({true, t, v, v_midi[v], f, v_amp[v]});
+    ev.push_back({EvKind::On, t, v, v_midi[v], f, v_amp[v]});
 }
 
 void Decoder::stop(int pi, double t, std::vector<NoteEvent>& ev) {
     const int v = voice_of_[pi];
     if (v < 0) return;
-    ev.push_back({false, t, v, cfg_.pitch_lo + pi, v_freq[v], 0.0});
+    ev.push_back({EvKind::Off, t, v, cfg_.pitch_lo + pi, v_freq[v], 0.0});
     active_[pi] = 0;
     voice_of_[pi] = -1;
     below_since_[pi] = NaN;
     v_pitch[v] = -1;
     v_amp[v] = 0.0;  // frequency stays as the last value for release tails
+}
+
+int Decoder::provisional(int q, double t, const float* pf) const {
+    int best = -1;
+    double best_pf = 2.0;
+    const float drop = float(p.correct_drop);
+    for (int pi = 0; pi < n_pitch_; ++pi) {
+        if (!active_[pi] || t - t_on_[pi] >= p.correct_ms / 1e3 || pf[pi] >= drop) continue;
+        const int d = std::abs(pi - q);
+        if ((d <= int(p.correct_span) || d == 12 || d == 19 || d == 24) && pf[pi] < best_pf) {
+            best = pi;
+            best_pf = pf[pi];
+        }
+    }
+    return best;
+}
+
+void Decoder::move(int pi, int q, double t, const float* mag, int n_bins, std::vector<NoteEvent>& ev) {
+    const int v = voice_of_[pi];
+    const double t_on = t_on_[pi];
+    active_[pi] = 0;
+    voice_of_[pi] = -1;
+    below_since_[pi] = NaN;
+    active_[q] = 1;
+    voice_of_[q] = v;
+    t_on_[q] = t_on;
+    above_since_[q] = NaN;
+    below_since_[q] = NaN;
+    armed_[q] = 0;
+    double f = nominal_hz_[q];
+    set_freq(q, f);
+    t_refined_[q] = t;
+    if (p.refine && mag) {
+        const double fr = refiner_.refine(mag, n_bins, f, others_h(q));
+        if (fr > 0.0) {
+            f = fr;
+            set_freq(q, fr);
+        }
+    }
+    const int prev = v_midi[v];
+    v_pitch[v] = q;
+    v_midi[v] = cfg_.pitch_lo + q;
+    v_freq[v] = f;
+    v_amp[v] = amp_of(mag, n_bins, f);
+    ev.push_back({EvKind::Move, t, v, v_midi[v], f, v_amp[v], prev});
 }
 
 void Decoder::step(double t, const float* pf, const float* po, const float* mag, int n_bins, double rms_db,
@@ -253,7 +299,13 @@ void Decoder::step(double t, const float* pf, const float* po, const float* mag,
     for (int pi : cands_) {
         const bool fast = trig_[pi] && pf[pi] >= half_on;
         if (std::isnan(above_since_[pi])) above_since_[pi] = t;
-        if (fast || t - above_since_[pi] >= on_s) start(pi, t, pf, mag, n_bins, ev, -1);
+        if (fast || t - above_since_[pi] >= on_s) {
+            const int old = p.correct_ms > 0 ? provisional(pi, t, pf) : -1;
+            if (old >= 0)
+                move(old, pi, t, mag, n_bins, ev);
+            else
+                start(pi, t, pf, mag, n_bins, ev, -1);
+        }
     }
     for (int i = 0; i < n; ++i)
         if (!active_[i] && !wanted_[i]) above_since_[i] = NaN;

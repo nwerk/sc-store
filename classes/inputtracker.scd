@@ -8,6 +8,10 @@
 // the guitar through its own JACK input and writes its results straight into a block of control buses on
 // scsynth (OSC /c_setn) - sclang is not in the audio path.
 // Note on/off events are additionally sent to sclang (/polytracker/noteOn, /polytracker/noteOff).
+// With pitch correction on (`~tracker.set(\correct_ms, 60)`, off by default) a note may change its pitch in its
+// first 60 ms instead of ending and restarting (/polytracker/noteMove): the voice buses simply change frequency;
+// onNoteMove gets the voice, the new note and the previous one. Without an onNoteMove handler a move is passed on
+// as onNoteOff(previous) + onNoteOn(new), so handlers written for on/off alone stay consistent.
 //
 // Bus block layout (control buses starting at tracker.block.index, see tracker/polytracker/outputs.py):
 //   +0 mono freq (Hz, 0 = none)  +1 mono amp  +2 number of sounding notes  +3 heartbeat
@@ -17,6 +21,7 @@
 //   ~tracker = ~polyTrackerNew.(s, (inChan: 0, freqBus: ~freqBus, ampBus: ~ampBus)).start;
 //   ~tracker.onNoteOn  = { |voice, midi, freq, amp| ... };
 //   ~tracker.onNoteOff = { |voice, midi| ... };
+//   ~tracker.onNoteMove = { |voice, midi, freq, amp, prevMidi| ... };   // only with correct_ms > 0
 //   In.kr(~tracker.voiceFreqBus.index, 6)   // all voice frequencies in a SynthDef
 //   ~tracker.set(\monoMode, \lowest);       // latest | lowest | highest | loudest (also: on, off, onset, gate_db, ...)
 //   ~tracker.run(false);  ~tracker.run(true) // pause / resume (also stops the analysis process: no CPU)
@@ -116,6 +121,7 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 	t[\held] = Dictionary.new;
 	t[\onNoteOn] = nil;
 	t[\onNoteOff] = nil;
+	t[\onNoteMove] = nil;
 	t[\running] = false;
 	t[\lastSeen] = 0;
 	t[\load] = 0;
@@ -228,6 +234,16 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 				me[\held].removeAt(v);
 				me[\onNoteOff].value(v, midi);
 			}, '/polytracker/noteOff');
+			OSCdef(\polyTracker_noteMove, { |msg|
+				var v = msg[1].asInteger, h = (midi: msg[2].asInteger, freq: msg[3], amp: msg[4]), prev = msg[5].asInteger;
+				me[\held][v] = h;
+				if(me[\onNoteMove].notNil) {
+					me[\onNoteMove].value(v, h[\midi], h[\freq], h[\amp], prev);
+				} {
+					me[\onNoteOff].value(v, prev);
+					me[\onNoteOn].value(v, h[\midi], h[\freq], h[\amp]);
+				};
+			}, '/polytracker/noteMove');
 			OSCdef(\polyTracker_stats, { |msg|
 				me[\lastSeen] = Main.elapsedTime;
 				me[\load] = msg[1];
@@ -284,7 +300,7 @@ SynthDef(\tartiniTracker_sigmundStyle, ~polyTrackerGraph).add;  // legacy name, 
 				NetAddr("127.0.0.1", self[\opts][\controlPort]).sendMsg("/polytracker/quit");
 				self[\pid] !? { |p| SystemClock.sched(1.0, { ("kill " ++ p ++ " 2>/dev/null").unixCmd(postOutput: false); nil }) };
 			};
-			[\polyTracker_noteOn, \polyTracker_noteOff, \polyTracker_stats, \polyTracker_ready].do { |k| OSCdef(k).free };
+			[\polyTracker_noteOn, \polyTracker_noteOff, \polyTracker_noteMove, \polyTracker_stats, \polyTracker_ready].do { |k| OSCdef(k).free };
 			self[\synth] !? { self[\synth].free };
 			self[\panic].value(self);
 			self[\ownedBuses].do { |b| b.free };

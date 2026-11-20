@@ -12,7 +12,7 @@ guitar ──► JACK ──┬─► scsynth ─ \polyTracker (amp, onsets, mon
                         frontend (FFT features) ─► PitchNet (numpy) ─► decoder (hysteresis, onsets, voices)
                                                                       └► pitch refinement (cents)
                         ├── /c_setn  ─────────────► scsynth: 22 control buses (per-voice freq/amp/gate, mono)
-                        └── /polytracker/noteOn|noteOff|stats|ready ─► sclang
+                        └── /polytracker/noteOn|noteOff|noteMove|stats|ready ─► sclang
 ```
 
 sclang is never in the audio path: the tracker writes into scsynth's control buses directly over UDP.
@@ -30,6 +30,8 @@ s.waitForBoot {
 };
 ~tracker.set(\monoMode, \lowest);   // latest (default) | lowest | highest | loudest
 ~tracker.set(\on, 0.8);             // decoder thresholds at runtime: on, off, onset, gate_db, retrigger_ms, ...
+~tracker.set(\correct_ms, 60);      // pitch correction of just-started notes (off by default, see Latency)
+~tracker.onNoteMove = { |voice, midi, freq, amp, prevMidi| ... };   // a corrected note (no new attack)
 ~tracker.run(false);                // pause (also stops the Python analysis => 0 % CPU); run(true) resumes
 ~tracker.quit;                      // NOT .stop (Object:stop exists and does nothing)
 ```
@@ -96,13 +98,19 @@ decoder thresholds; **player 05 was never used for anything but the numbers belo
 
 | GuitarSet player 05 (unseen) | pickup mix | microphone |
 |---|---|---|
-| frame precision / recall / F1 | 0.849 / 0.899 / **0.873** | 0.849 / 0.872 / **0.861** |
-| onset precision / recall / F1 | 0.729 / 0.783 / **0.755** | 0.689 / 0.734 / **0.711** |
-| onset delay after annotated onset, median / 90th pct | 6.2 / 30 ms | 10.9 / 35 ms |
-| pitch error of reported frequency, median | 3.9 cents | 4.1 cents |
-| frames within 10 / 25 cents | 74 % / 93 % | 74 % / 93 % |
+| frame precision / recall / F1 | 0.844 / 0.906 / **0.874** | 0.842 / 0.882 / **0.862** |
+| onset precision / recall / F1 | 0.692 / 0.839 / **0.758** | 0.640 / 0.804 / **0.713** |
+| onset delay after annotated onset, median / 90th pct | 3.8 / 23 ms | 8.2 / 28 ms |
+| pitch error of reported frequency, median | 3.9 cents | 4.2 cents |
+| frames within 10 / 25 cents | 74 % / 93 % | 73 % / 93 % |
+| *with pitch correction* (`correct_ms 60`): onset P / R / F1 | 0.747 / 0.829 / **0.785** | 0.690 / 0.787 / **0.735** |
+| … onset delay, median / 90th pct | 3.5 / 26 ms | 7.5 / 29 ms |
+| … notes whose pitch was corrected, median time of the correction | 14 %, 16 ms | 16 %, 11 ms |
+| … onset F1 scored on the pitch heard first | 0.723 | 0.665 |
 
-(Player 04, used for tuning: frame F1 0.860 / 0.835, onset F1 0.697 / 0.645.)
+The decoder thresholds before 2026-11-20 (`on 0.7, onset 0.65, on_confirm_ms 8`) gave the same F1 (0.873 / 0.755
+pickup, 0.861 / 0.711 mic) with later onsets: 6.2 / 30 ms pickup, 10.9 / 35 ms mic. (Player 04, used for tuning,
+pickup mix: frame F1 0.859, onset F1 0.694, with correction 0.716.)
 
 Read these numbers with their limits in mind:
 
@@ -123,9 +131,17 @@ note.
 ### Latency
 
 * The decision for a note is made on the frame that ends at most one hop (5.3 ms) after the new audio. Measured
-  against GuitarSet's onset labels the median delay is 4–6 ms (pickup) / ~10 ms (mic), 90th percentile ≈ 30 ms
-  (soft attacks, strummed chords). The onset head can start a note before the frame head is certain, which is
-  where the low median comes from.
+  against GuitarSet's onset labels the median delay is ~4 ms (pickup) / ~8 ms (mic), 90th percentile 23–28 ms
+  (soft attacks, strummed chords). Most notes start from the onset head, before the frame head is certain
+  (`onset 0.4`; the frame head alone needs `on 0.8`), which is where the low median comes from.
+* **Pitch correction** (`correct_ms`, off by default; the idea comes from trackers that drive MPE synths): for
+  its first `correct_ms` a note is provisional. If a related pitch (within an octave, or a twelfth or two octaves
+  away) takes over while the first guess fades, the same voice moves to the new pitch (`noteMove`, no new
+  attack) instead of ending one note and starting another. With 60 ms the notes are right more often
+  (onset F1 +3 points, table above), but about one note in seven changes its pitch, typically 10–16 ms after
+  it started, inside the pick attack. Synths that read the voice buses glide there by themselves; the cembalo
+  retunes the string. Whether that sounds better than the occasional wrong extra note depends on the synth:
+  try `~tracker.set(\correct_ms, 60)` and listen.
 * On top come one JACK period of the capture path and ≤ 1.3 ms for scsynth to read the new bus values
   (`blockSize 64`). Transport Python → scsynth is UDP over loopback.
 * The pitch value of a held note follows with the 85 ms window (bends/vibrato are smoothed, `glide_alpha`).
@@ -174,8 +190,8 @@ behind (`dropped` in the stats).
   *onset*. BatchNorm is folded into the weights on export; `PitchNetNP.predict_one` is an allocation-free
   single-frame path (~0.2 ms).
 * **Decoder** (`decoder.py`): hysteresis (`on`/`off`), confirmation times, onset-triggered start/retrigger with a
-  refractory period, voice allocation with stealing of the weakest voice, a silence gate. Everything is
-  time-based, not frame-count based.
+  refractory period, voice allocation with stealing of the weakest voice, a silence gate, optional pitch
+  correction of provisional notes (`correct_ms`). Everything is time-based, not frame-count based.
 * **Refiner** (`refine.py`): per note, the long-window spectrum is searched around each of the first harmonics
   (excluding those that coincide with another active note), parabolic interpolation, inharmonicity
   correction, weighted-median agreement of the votes. Costs ~0.025 ms per note and is throttled to every 12 ms.
@@ -208,6 +224,7 @@ scripts/jack_play.py song.wav --connect polytracker:in     # simulate a guitar o
 ```
 
 Control messages (UDP, default port 57150): `/polytracker/set name value` (`on off onset gate_db retrigger_ms
-on_confirm_ms off_confirm_ms amp_range_db glide_alpha refine mono_mode pause`), `/polytracker/reset`,
+on_confirm_ms off_confirm_ms amp_range_db glide_alpha correct_ms correct_span correct_drop refine mono_mode
+pause`), `/polytracker/reset`,
 `/polytracker/quit`. Events to sclang: `/polytracker/noteOn voice midi freq amp`, `/polytracker/noteOff voice
-midi`, `/polytracker/stats load frames dropped worst_ms xruns`, `/polytracker/ready model bus voices`.
+midi`, `/polytracker/noteMove voice midi freq amp prevMidi` (only with `correct_ms` > 0), `/polytracker/stats load frames dropped worst_ms xruns`, `/polytracker/ready model bus voices`.

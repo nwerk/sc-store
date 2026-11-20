@@ -46,7 +46,8 @@ cd tracker && .venv/bin/python native/tests/compare.py
 
 Runs Python and native frame by frame over a synthetic performance (single notes, a six-string chord, a bend,
 vibrato, a repeated note, a noise burst, hiss) at hop 256 and 512, with 4 voices, without refinement, at
-44.1 kHz and on silence. It compares the network input, the network output, every note event and the voice
+44.1 kHz, on silence, with pitch correction and with the old decoder thresholds; if GuitarSet is unpacked in
+`tracker/data/guitarset`, also 20 s of real playing with pitch correction (where corrections actually happen). It compares the network input, the network output, every note event and the voice
 frequencies and amplitudes. Note decisions must be identical. The numbers differ only by float32 rounding
 (features < 2e-4, probabilities < 1e-5).
 

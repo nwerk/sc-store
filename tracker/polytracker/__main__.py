@@ -29,6 +29,14 @@ def _add_decoder_args(ap):
     g.add_argument("--off", type=float, default=d.off_thresh, help="frame probability below which a note ends")
     g.add_argument("--onset", type=float, default=d.onset_thresh, help="onset-head probability that signals a pick")
     g.add_argument("--gate-db", type=float, default=d.gate_db, help="silence gate on the 85 ms RMS level (dBFS)")
+    g.add_argument("--confirm-ms", type=float, default=d.on_confirm_ms,
+                   help="frame probability must hold this long before a note starts without an onset")
+    g.add_argument("--correct-ms", type=float, default=d.correct_ms,
+                   help="a note's pitch may be corrected this long after its start (0 = off, 60 = tuned)")
+    g.add_argument("--correct-span", type=int, default=d.correct_span,
+                   help="neighbours up to this many semitones may replace a provisional note (plus 19 and 24)")
+    g.add_argument("--correct-drop", type=float, default=d.correct_drop,
+                   help="a provisional note is replaced only once its frame probability is below this")
     g.add_argument("--voices", type=int, default=d.max_voices)
     g.add_argument("--no-refine", action="store_true", help="report nominal semitone frequencies only")
 
@@ -44,7 +52,8 @@ def _hop(s: str):
 
 def _params(a) -> DecoderParams:
     return DecoderParams(on_thresh=a.on, off_thresh=a.off, onset_thresh=a.onset, gate_db=a.gate_db,
-                         max_voices=a.voices, refine=not a.no_refine)
+                         on_confirm_ms=a.confirm_ms, correct_ms=a.correct_ms, correct_span=a.correct_span,
+                         correct_drop=a.correct_drop, max_voices=a.voices, refine=not a.no_refine)
 
 
 def cmd_run(a):

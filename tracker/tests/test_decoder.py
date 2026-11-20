@@ -102,3 +102,36 @@ def test_amplitude_and_frequency_follow_signal(cfg):
     cents = 1200 * np.log2(ev[0].freq / f_true)
     assert abs(cents) < 4.0, cents
     assert 0.3 < ev[0].amp < 1.0
+
+
+def _octave_slip(n_wrong=3, n_gap=0):
+    """The onset head fires on an octave above the played note; a few frames later the frame head knows better."""
+    return ([({22: 0.5}, {22: 0.9})] + [({22: 0.5}, {})] * (n_wrong - 1) + [({22: 0.1}, {})] * n_gap
+            + [({22: 0.1, 10: 0.9}, {})] * 10)
+
+
+def test_correction_moves_the_voice(cfg):
+    dec = make(cfg, correct_ms=60.0, on_confirm_ms=0.0)
+    ev = drive(dec, cfg, _octave_slip())
+    assert [e.kind for e in ev] == ["on", "move"]
+    assert ev[0].voice == ev[1].voice
+    assert ev[1].prev == cfg.pitch_lo + 22 and ev[1].pitch == cfg.pitch_lo + 10
+    v = dec.voices()
+    assert v.active[ev[0].voice] and v.midi[ev[0].voice] == cfg.pitch_lo + 10
+    assert v.t_on[ev[0].voice] == ev[0].t  # the note keeps its start
+
+
+def test_correction_off_by_default_and_outside_window(cfg):
+    ev = drive(make(cfg, on_confirm_ms=0.0), cfg, _octave_slip())
+    assert "move" not in [e.kind for e in ev] and [e.kind for e in ev].count("on") == 2
+    late = make(cfg, correct_ms=20.0, on_confirm_ms=0.0)  # the slip arrives after ~31 ms
+    assert "move" not in [e.kind for e in drive(late, cfg, _octave_slip(n_wrong=6))]
+
+
+def test_correction_needs_a_related_pitch_and_a_fading_note(cfg):
+    unrelated = [({22: 0.5}, {22: 0.9})] + [({22: 0.1, 27: 0.9}, {})] * 10  # a fourth away, span 2
+    assert "move" not in [e.kind for e in drive(make(cfg, correct_ms=60.0, correct_span=2, on_confirm_ms=0.0),
+                                               cfg, unrelated)]
+    still_strong = [({22: 0.9}, {22: 0.9})] + [({22: 0.9, 10: 0.9}, {})] * 10  # a real second note
+    ev = drive(make(cfg, correct_ms=60.0, on_confirm_ms=0.0), cfg, still_strong)
+    assert [e.kind for e in ev] == ["on", "on"] and ev[0].voice != ev[1].voice

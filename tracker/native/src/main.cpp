@@ -72,7 +72,8 @@ Args parse(int argc, char** argv) {
 
 // unknown options are an error (like argparse): a typo in inputtracker.scd's decoderArgs must not pass silently
 void check_options(const Args& a, std::initializer_list<const char*> extra) {
-    static const char* decoder[] = {"--on", "--off", "--onset", "--gate-db", "--voices", "--no-refine", "--model"};
+    static const char* decoder[] = {"--on", "--off", "--onset", "--gate-db", "--voices", "--no-refine", "--model",
+                                    "--confirm-ms", "--correct-ms", "--correct-span", "--correct-drop"};
     for (const auto& kv : a.opt) {
         bool ok = false;
         for (const char* k : decoder) ok |= kv.first == k;
@@ -87,6 +88,10 @@ DecoderParams decoder_params(const Args& a) {
     p.off_thresh = a.num("--off", p.off_thresh);
     p.onset_thresh = a.num("--onset", p.onset_thresh);
     p.gate_db = a.num("--gate-db", p.gate_db);
+    p.on_confirm_ms = a.num("--confirm-ms", p.on_confirm_ms);
+    p.correct_ms = a.num("--correct-ms", p.correct_ms);
+    p.correct_span = a.num("--correct-span", p.correct_span);
+    p.correct_drop = a.num("--correct-drop", p.correct_drop);
     p.max_voices = int(a.num("--voices", p.max_voices));
     p.refine = !a.has("--no-refine");
     return p;
@@ -246,9 +251,12 @@ public:
 
     void send_events(const std::vector<NoteEvent>& ev) {
         for (const NoteEvent& e : ev) {
-            if (e.on) {
+            if (e.kind == EvKind::On) {
                 osc::Writer w("/polytracker/noteOn");
                 lang_.send(w.i(e.voice).i(e.pitch).f(float(e.freq)).f(float(e.amp)).packet());
+            } else if (e.kind == EvKind::Move) {
+                osc::Writer w("/polytracker/noteMove");
+                lang_.send(w.i(e.voice).i(e.pitch).f(float(e.freq)).f(float(e.amp)).i(e.prev).packet());
             } else {
                 osc::Writer w("/polytracker/noteOff");
                 lang_.send(w.i(e.voice).i(e.pitch).packet());
@@ -538,7 +546,7 @@ public:
                 next_end += hop;
                 if (verbose_)
                     for (const NoteEvent& e : events)
-                        std::printf("%9.3f %-3s v%d midi %d %7.2f Hz amp %.2f\n", e.t, e.on ? "on" : "off", e.voice,
+                        std::printf("%9.3f %-4s v%d midi %d %7.2f Hz amp %.2f\n", e.t, kind_name(e.kind), e.voice,
                                     e.pitch, e.freq, e.amp);
             }
             const double now = now_s();
@@ -573,7 +581,8 @@ private:
             {"onset", &DecoderParams::onset_thresh}, {"gate_db", &DecoderParams::gate_db},
             {"retrigger_ms", &DecoderParams::retrigger_ms}, {"on_confirm_ms", &DecoderParams::on_confirm_ms},
             {"off_confirm_ms", &DecoderParams::off_confirm_ms}, {"amp_range_db", &DecoderParams::amp_range_db},
-            {"glide_alpha", &DecoderParams::glide_alpha},
+            {"glide_alpha", &DecoderParams::glide_alpha}, {"correct_ms", &DecoderParams::correct_ms},
+            {"correct_span", &DecoderParams::correct_span}, {"correct_drop", &DecoderParams::correct_drop},
         };
         const std::string name = snake(s.name);
         try {
@@ -589,8 +598,9 @@ private:
             } else if (auto it = settable.find(name); it != settable.end()) {
                 tr_.dec.p.*(it->second) = arg_num(s.value);
             } else {
-                std::printf("[polytracker] unknown setting '%s'; known: amp_range_db, gate_db, glide_alpha, "
-                            "mono_mode, off, off_confirm_ms, on, on_confirm_ms, onset, pause, refine, retrigger_ms\n",
+                std::printf("[polytracker] unknown setting '%s'; known: amp_range_db, correct_drop, correct_ms, "
+                            "correct_span, gate_db, glide_alpha, mono_mode, off, off_confirm_ms, on, on_confirm_ms, "
+                            "onset, pause, refine, retrigger_ms\n",
                             name.c_str());
             }
         } catch (const std::exception& e) {  // a malformed message must never kill the tracker
@@ -700,7 +710,7 @@ int cmd_frames(const Args& a) {
             }
         }
         for (const NoteEvent& e : ev)
-            std::printf("%s %.9g %d %d %.9g %.9g\n", e.on ? "on" : "off", e.t, e.voice, e.pitch, e.freq, e.amp);
+            std::printf("%s %.9g %d %d %.9g %.9g\n", kind_name(e.kind), e.t, e.voice, e.pitch, e.freq, e.amp);
     }
     return 0;
 }

@@ -20,6 +20,7 @@ SETTABLE = {
     "on": "on_thresh", "off": "off_thresh", "onset": "onset_thresh", "gate_db": "gate_db",
     "retrigger_ms": "retrigger_ms", "on_confirm_ms": "on_confirm_ms", "off_confirm_ms": "off_confirm_ms",
     "amp_range_db": "amp_range_db", "glide_alpha": "glide_alpha",
+    "correct_ms": "correct_ms", "correct_span": "correct_span", "correct_drop": "correct_drop",
 }
 
 
@@ -95,7 +96,7 @@ class Runner:
         elif name == "pause":
             self.paused = bool(int(value))
         elif name in SETTABLE:
-            setattr(self.tracker.dec.p, SETTABLE[name], float(value))
+            setattr(self.tracker.dec.p, SETTABLE[name], int(value) if name == "correct_span" else float(value))
         else:
             print(f"[polytracker] unknown setting {name!r}; known: {sorted(SETTABLE) + ['mono_mode', 'refine', 'pause']}", flush=True)
 
@@ -182,7 +183,7 @@ class Runner:
                     next_end += hop
                     if self.verbose:
                         for e in events:
-                            print(f"{e.t:9.3f} {e.kind:3s} v{e.voice} midi {e.pitch} {e.freq:7.2f} Hz amp {e.amp:.2f}", flush=True)
+                            print(f"{e.t:9.3f} {e.kind:4s} v{e.voice} midi {e.pitch} {e.freq:7.2f} Hz amp {e.amp:.2f}", flush=True)
                 now = time.perf_counter()
                 if now - last_stats >= 1.0:
                     load = busy / (now - last_stats)

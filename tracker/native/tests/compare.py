@@ -108,7 +108,10 @@ def run_native(x, sr, hop, params, tmp):
     wav, fp, pp, vp = (tmp / n for n in ("in.f32", "feat.f32", "probs.f32", "voices.f64"))
     x.astype("<f4").tofile(wav)
     cmd = [str(BINARY), "frames", str(wav), "--sample-rate", str(sr), "--hop", str(hop), "--features", str(fp),
-           "--probs", str(pp), "--voices-out", str(vp), "--voices", str(params.max_voices)]
+           "--probs", str(pp), "--voices-out", str(vp), "--voices", str(params.max_voices),
+           "--on", repr(params.on_thresh), "--off", repr(params.off_thresh), "--onset", repr(params.onset_thresh),
+           "--confirm-ms", repr(params.on_confirm_ms), "--correct-ms", repr(params.correct_ms),
+           "--correct-span", str(params.correct_span), "--correct-drop", repr(params.correct_drop)]
     if not params.refine:
         cmd.append("--no-refine")
     out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
@@ -158,14 +161,15 @@ def compare(name, x, sr=48000, hop=256, params=None, verbose=False):
             problems.append(f"voice amplitudes differ by up to {va:.2e}")
     ok = not problems
     n_on = sum(e[0] == "on" for e in pe)
-    print(f"{'ok  ' if ok else 'FAIL'} {name:34s} frames {len(pf):5d}  notes {n_on:3d}  "
+    n_mv = sum(e[0] == "move" for e in pe)
+    print(f"{'ok  ' if ok else 'FAIL'} {name:34s} frames {len(pf):5d}  notes {n_on:3d}  moves {n_mv:3d}  "
           f"max diff: features {df:.1e}  probs {dp:.1e}")
     for p in problems:
         print("     " + p)
     if verbose:
         for a, b in zip(pe, ne):
-            print(f"     py {a[0]:3s} {a[1]:8.4f} v{a[2]} {a[3]} {a[4]:8.3f} {a[5]:.3f} | "
-                  f"nat {b[0]:3s} {b[1]:8.4f} v{b[2]} {b[3]} {b[4]:8.3f} {b[5]:.3f}")
+            print(f"     py {a[0]:4s} {a[1]:8.4f} v{a[2]} {a[3]} {a[4]:8.3f} {a[5]:.3f} | "
+                  f"nat {b[0]:4s} {b[1]:8.4f} v{b[2]} {b[3]} {b[4]:8.3f} {b[5]:.3f}")
     return ok
 
 
@@ -182,7 +186,18 @@ def main():
         compare("performance, no refine", x, params=DecoderParams(refine=False), verbose=verbose),
         compare("performance, 44.1 kHz", performance(44100, seed=2), sr=44100, hop=236, verbose=verbose),
         compare("silence", np.zeros(sr, dtype=np.float32), verbose=verbose),
+        compare("performance, correction", x, params=DecoderParams(correct_ms=60.0), verbose=verbose),
+        compare("performance, old thresholds", x, params=DecoderParams(on_thresh=0.7, onset_thresh=0.65,
+                                                                       on_confirm_ms=8.0), verbose=verbose),
     ]
+    gs = TRACKER / "data" / "guitarset" / "audio_mono-pickup_mix" / "05_Funk2-108-Eb_comp_mix.wav"
+    if gs.exists():  # real playing: corrections actually happen here
+        import soundfile as sf
+        from scipy.signal import resample_poly
+        y, gsr = sf.read(str(gs), dtype="float32")
+        y = resample_poly(y[: 20 * gsr], 160, 147).astype(np.float32) if gsr == 44100 else y[: 20 * gsr]
+        results.append(compare("GuitarSet 20 s, correction", y, params=DecoderParams(correct_ms=60.0),
+                               verbose=verbose))
     print("all match" if all(results) else "MISMATCH")
     sys.exit(0 if all(results) else 1)
 

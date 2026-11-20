@@ -9,20 +9,27 @@
 namespace pt {
 
 struct DecoderParams {
-    double on_thresh = 0.7, off_thresh = 0.4, onset_thresh = 0.65;
-    double on_confirm_ms = 8.0, off_confirm_ms = 15.0, retrigger_ms = 90.0;
+    double on_thresh = 0.8, off_thresh = 0.4, onset_thresh = 0.4;
+    double on_confirm_ms = 2.0, off_confirm_ms = 15.0, retrigger_ms = 90.0;
+    // pitch correction of provisional notes (see decoder.py); correct_ms 0 = off
+    double correct_ms = 0.0, correct_span = 12.0, correct_drop = 0.7;
     int max_voices = 6;
     double gate_db = -80.0, amp_range_db = 60.0;
     bool refine = true;
     double glide_alpha = 0.6, refine_every_ms = 12.0;
 };
 
+enum class EvKind { On, Off, Move };  // Move: same voice, new pitch, no new attack; prev = previous MIDI note
+
 struct NoteEvent {
-    bool on;
+    EvKind kind;
     double t;
     int voice, pitch;
     double freq, amp;
+    int prev = -1;
 };
+
+inline const char* kind_name(EvKind k) { return k == EvKind::On ? "on" : k == EvKind::Off ? "off" : "move"; }
 
 constexpr int COLLISION_H = 10;  // harmonics of other notes that refinement avoids
 using Harm = std::array<double, COLLISION_H>;
@@ -62,6 +69,8 @@ private:
     double amp_of(const float* mag, int n_bins, double f) const;
     void start(int p, double t, const float* pf, const float* mag, int n_bins, std::vector<NoteEvent>& ev, int voice);
     void stop(int p, double t, std::vector<NoteEvent>& ev);
+    int provisional(int q, double t, const float* pf) const;
+    void move(int p, int q, double t, const float* mag, int n_bins, std::vector<NoteEvent>& ev);
     const std::vector<const Harm*>& others_h(int p);
     void track(double t, const float* mag, int n_bins);
 

@@ -212,6 +212,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 //   .enable(bool)   fade in/out (and stop/start voice allocation)
 //   .set(\key, val) voice params (next notes), or \volume \revMix \room (output stage, immediately)
 //   .noteOn(midi, freq)  pluck (called from the tracker's onNoteOn; chained with an existing handler)
+//   .noteMove(prevMidi, midi, freq)  retune a string the tracker corrected (onNoteMove; no second pluck)
 //   .monitor(bool)  post every note's level, brightness and picking position (for the pluck calibration)
 //   .quit           remove everything (not .free: Object:free would silently do nothing)
 ~cembaloNew = { |server, tracker, opts|
@@ -221,7 +222,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	// the expensive part of the cembalo (on a Pi 4 about 4-5 % of scsynth's time each): played fast, 12 of them
 	// took scsynth to 98 % and into dropouts.
 	var o = (inBus: 0, out: 0, target: nil, maxVoices: 12, cpuLimit: 80, volume: 1.0, enabled: false, attack: \onset);
-	var prevOnNoteOn;
+	var prevOnNoteOn, prevOnNoteMove;
 	opts !? { opts.keysValuesDo { |k, v| o[k] = v } };
 
 	c[\opts] = o;
@@ -234,6 +235,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	c[\outParams] = (volume: o[\volume], revMix: 0.22, room: 0.55);
 	c[\voices] = List.new;          // oldest first
 	c[\byMidi] = Dictionary.new;
+	c[\midiOf] = IdentityDictionary.new;  // voice -> its current note (changes when the tracker corrects it)
 
 	c[\velBus] = Bus.control(server, 2);  // level (dBFS), brightness (Hz)
 	c[\outBus] = Bus.audio(server, 2);
@@ -289,11 +291,13 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 					Synth.basicNew(\cembaloAttack, server).newMsg(syn, args));
 			};
 			syn.onFree {
+				var m = self[\midiOf].removeAt(syn);
 				self[\voices].remove(syn);
-				if(self[\byMidi][midi] === syn) { self[\byMidi].removeAt(midi) };
+				if(self[\byMidi][m] === syn) { self[\byMidi].removeAt(m) };
 			};
 			self[\voices].add(syn);
 			self[\byMidi][midi] = syn;
+			self[\midiOf][syn] = midi;
 			if(self[\monitoring]) { self.postTouch(midi, freq) };
 		};
 		self
@@ -302,6 +306,22 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 	// Calibration aid: what the measurement says about each note. Read 8 ms after the note-on, when the voice
 	// stops listening; the voice itself takes the values at the level's peak, so this is close, not identical.
 	c[\monitor] = { |self, on = true| self[\monitoring] = on; self };
+	// The tracker corrected the pitch of a note it started a moment ago: retune that string (both synths of the
+	// voice group take \freq) instead of plucking again. A string already sounding the new pitch is damped, as for
+	// a re-pluck. If the voice is unknown (cembalo was disabled when it started) nothing happens.
+	c[\noteMove] = { |self, prevMidi, midi, freq|
+		var syn = self[\byMidi][prevMidi], old;
+		if(self[\enabled] and: { syn.notNil }) {
+			old = self[\byMidi][midi];
+			if(old.notNil and: { old !== syn }) { self.choke(old); self[\voices].remove(old) };
+			self[\byMidi].removeAt(prevMidi);
+			self[\byMidi][midi] = syn;
+			self[\midiOf][syn] = midi;
+			server.sendBundle(nil, ['/error', -1], syn.setMsg(\freq, freq));
+		};
+		self
+	};
+
 	c[\postTouch] = { |self, midi, freq|
 		var p = self[\params];
 		SystemClock.sched(0.008, {
@@ -354,7 +374,7 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 		self[\group].free;
 		self[\velBus].free;
 		self[\outBus].free;
-		if(tracker.notNil) { tracker[\onNoteOn] = prevOnNoteOn };
+		if(tracker.notNil) { tracker[\onNoteOn] = prevOnNoteOn; tracker[\onNoteMove] = prevOnNoteMove };
 	};
 
 	// chain into the tracker's note-on callback, keeping any handler that is already there
@@ -363,6 +383,11 @@ SynthDef(\cembaloOut, { |in=0, out=0, amp=0, revMix=0.22, room=0.55|
 		tracker[\onNoteOn] = { |voice, midi, freq, amp|
 			prevOnNoteOn.value(voice, midi, freq, amp);
 			c.noteOn(midi, freq);
+		};
+		prevOnNoteMove = tracker[\onNoteMove];
+		tracker[\onNoteMove] = { |voice, midi, freq, amp, prevMidi|
+			prevOnNoteMove.value(voice, midi, freq, amp, prevMidi);
+			c.noteMove(prevMidi, midi, freq);
 		};
 	};
 

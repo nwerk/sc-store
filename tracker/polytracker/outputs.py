@@ -84,6 +84,8 @@ class OscOutput:
         for e in events:
             if e.kind == "on":
                 self.lang.send(encode("/polytracker/noteOn", (e.voice, e.pitch, e.freq, e.amp)))
+            elif e.kind == "move":
+                self.lang.send(encode("/polytracker/noteMove", (e.voice, e.pitch, e.freq, e.amp, e.prev)))
             else:
                 self.lang.send(encode("/polytracker/noteOff", (e.voice, e.pitch)))
 

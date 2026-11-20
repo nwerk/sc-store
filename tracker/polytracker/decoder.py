@@ -3,6 +3,12 @@
 Time-based (not frame-count based) so dropped frames or a different hop do not
 change the behaviour. Hysteresis avoids flicker, the onset head re-triggers
 repeated notes and lets new notes start before the frame head is fully sure.
+
+Correction (``correct_ms`` > 0): a note is provisional for its first ``correct_ms``. If, in that time, a related
+pitch (a neighbour within ``correct_span`` semitones, or an octave, twelfth or two octaves away) wants to start
+while the provisional note has lost its support (frame probability below ``correct_drop``), the voice is moved
+to the new pitch ("move" event) instead of ending one note and starting another. Notes can then start on less
+evidence: a wrong first guess costs a pitch change inside the attack, not a second pluck.
 """
 from __future__ import annotations
 
@@ -17,10 +23,12 @@ from .refine import PitchRefiner
 
 @dataclass
 class DecoderParams:
-    on_thresh: float = 0.7  # frame probability that starts a note (tuned on GuitarSet validation, see tune_decoder.py)
+    # on/onset/on_confirm_ms tuned on GuitarSet player 04: notes start mostly from the onset head (at half of
+    # on_thresh), the frame head alone needs more certainty
+    on_thresh: float = 0.8  # frame probability that starts a note
     off_thresh: float = 0.4  # frame probability below which a note is ending
-    onset_thresh: float = 0.65  # onset-head probability that signals a pick
-    on_confirm_ms: float = 8.0  # frame probability must hold this long (0 = immediate)
+    onset_thresh: float = 0.4  # onset-head probability that signals a pick
+    on_confirm_ms: float = 2.0  # frame probability must hold this long (0 = immediate)
     off_confirm_ms: float = 15.0
     retrigger_ms: float = 90.0  # minimum time between two onsets of the same pitch
     max_voices: int = 6
@@ -29,6 +37,9 @@ class DecoderParams:
     refine: bool = True
     glide_alpha: float = 0.6  # smoothing of the refined frequency (1 = none)
     refine_every_ms: float = 12.0  # pitch refinement interval per note (it is the most expensive decoder step)
+    correct_ms: float = 0.0  # a note's pitch may be corrected (moved) this long after its start (0 = never; 60 tuned)
+    correct_span: int = 12  # neighbours up to this many semitones count as related (plus 19 and 24)
+    correct_drop: float = 0.7  # the provisional pitch must have fallen below this frame probability
 
     def to_dict(self):
         return asdict(self)
@@ -36,12 +47,13 @@ class DecoderParams:
 
 @dataclass
 class NoteEvent:
-    kind: str  # "on" | "off"
+    kind: str  # "on" | "off" | "move" (same voice, new pitch, no new attack; ``prev`` = previous MIDI note)
     t: float  # seconds (time of the frame that produced the event)
     voice: int
     pitch: int  # MIDI note
     freq: float
     amp: float
+    prev: int = -1
 
 
 @dataclass
@@ -132,6 +144,46 @@ class Decoder:
         self.v_amp[v] = self._amps(mag, [f])[0]
         events.append(NoteEvent("on", t, v, int(self.v_midi[v]), float(f), float(self.v_amp[v])))
 
+    def _provisional(self, q, t, pf):
+        """The provisional note that pitch ``q`` corrects, or -1."""
+        P = self.p
+        best, best_pf = -1, 2.0
+        for p in np.flatnonzero(self.active):
+            d = abs(int(p) - int(q))
+            if t - self.t_on[p] >= P.correct_ms / 1e3 or pf[p] >= P.correct_drop:
+                continue
+            if (d <= P.correct_span or d in (12, 19, 24)) and pf[p] < best_pf:
+                best, best_pf = int(p), float(pf[p])
+        return best
+
+    def _move(self, p, q, t, mag, events):
+        """Hand the voice of note ``p`` to pitch ``q``. The note keeps its start time (and its window)."""
+        v = int(self.voice_of[p])
+        t_on = self.t_on[p]
+        self.active[p] = False
+        self.voice_of[p] = -1
+        self.below_since[p] = np.nan
+        self.active[q] = True
+        self.voice_of[q] = v
+        self.t_on[q] = t_on
+        self.above_since[q] = np.nan
+        self.below_since[q] = np.nan
+        self.armed[q] = False
+        f = self.nominal_hz[q]
+        self._set_freq(q, f)
+        self.t_refined[q] = t
+        if self.p.refine and mag is not None:
+            fr, _ = self.refiner.refine(mag, f, None, self._others_h(q))
+            if fr is not None:
+                f = fr
+                self._set_freq(q, fr)
+        prev = int(self.v_midi[v])
+        self.v_pitch[v] = q
+        self.v_midi[v] = self.cfg.pitch_lo + q
+        self.v_freq[v] = f
+        self.v_amp[v] = self._amps(mag, [f])[0]
+        events.append(NoteEvent("move", t, v, int(self.v_midi[v]), float(f), float(self.v_amp[v]), prev))
+
     def _stop(self, p, t, events):
         v = int(self.voice_of[p])
         if v < 0:
@@ -183,7 +235,11 @@ class Decoder:
             if np.isnan(self.above_since[p]):
                 self.above_since[p] = t
             if fast or t - self.above_since[p] >= on_s:
-                self._start(int(p), t, p_frame, mag, events)
+                old = self._provisional(p, t, p_frame) if P.correct_ms > 0 else -1
+                if old >= 0:
+                    self._move(old, int(p), t, mag, events)
+                else:
+                    self._start(int(p), t, p_frame, mag, events)
         self.above_since[~self.active & ~wanted] = np.nan
 
         self._track(t, mag)
