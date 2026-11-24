@@ -12,7 +12,7 @@
 #
 # Pi (detected by its pisound install): if a Focusrite interface (Scarlett, Clarett, ...) is connected, the
 #   pisound JACK service is replaced by jackd on the Focusrite and restored on exit; otherwise the running
-#   pisound JACK is used. Called by launchers/boot-sc.sh (sc-boot.service, pisound button).
+#   pisound JACK is used, switched to JACK_PERIOD (jack_bufsize) and back to its own period on exit. Called by launchers/boot-sc.sh (sc-boot.service, pisound button).
 #   The CPU governor is set to `performance` (CPU_GOVERNOR, empty = leave it) and under-voltage / throttling
 #   reported by the firmware is printed at start and exit.
 # Any other Linux machine (laptop): a JACK server that is already running is used as it is. Otherwise jackd is
@@ -48,8 +48,9 @@ else
     : "${JACK_PERIOD:=128}"
 fi
 : "${JACK_RATE:=48000}"                 # must match s.options.sampleRate in config/serversetup.scd
-: "${JACK_PERIOD:=256}"                 # Pi: 256 samples = 5.3 ms per period (must be a multiple of scsynth's
-                                        # blockSize, 64, config/serversetup.scd)
+: "${JACK_PERIOD:=128}"                 # Pi: 128 samples = 2.7 ms per period (must be a multiple of scsynth's
+                                        # blockSize, 64, config/serversetup.scd); if it crackles (xruns in the
+                                        # PERF_LOG=1 lines), go back with JACK_PERIOD=256
 : "${JACK_NPERIODS:=2}"
 : "${UI_HTTP_PORT:=8080}"               # serves ui/main.tosc to the tablet; 0 = off
 if [[ "$ON_PI" -eq 1 ]]; then
@@ -132,6 +133,7 @@ report_pi_throttling() {
 # ---- JACK handling ----
 SCARLETT_JACK_STARTED=0   # Pi: we replaced the pisound JACK with jackd on the Focusrite
 DESKTOP_JACK_STARTED=0    # laptop: we started jackd ourselves
+PI_JACK_OLD_PERIOD=""     # Pi: period of the pisound JACK before we changed it
 JACK_PID=""
 
 # card number of the first connected Focusrite interface (empty if none).
@@ -169,6 +171,20 @@ restore_pi_jack() {
         fi
         echo "Pisound JACK restored."
         SCARLETT_JACK_STARTED=0
+    fi
+}
+
+# period of the running JACK server in samples (empty if unknown)
+jack_period() {
+    command -v jack_bufsize >/dev/null && JACK_NO_START_SERVER=1 jack_bufsize 2>/dev/null | grep -o '[0-9]\+' | head -n 1
+}
+
+# Pi: give the pisound JACK its own period back
+restore_pi_jack_period() {
+    if [[ -n "$PI_JACK_OLD_PERIOD" ]]; then
+        echo "Setting the pisound JACK back to its period of $PI_JACK_OLD_PERIOD samples."
+        JACK_NO_START_SERVER=1 jack_bufsize "$PI_JACK_OLD_PERIOD" >/dev/null 2>&1 || true
+        PI_JACK_OLD_PERIOD=""
     fi
 }
 
@@ -238,6 +254,7 @@ cleanup() {
     fi
     stop_ui_server
     restore_pi_jack
+    restore_pi_jack_period
     stop_desktop_jack
     [[ "$ON_PI" -eq 1 ]] && report_pi_throttling "at exit"
     exit 1
@@ -342,12 +359,26 @@ if [[ "$ON_PI" -eq 1 ]]; then
         fi
     else
         echo "No Focusrite found, using pisound via existing JACK."
+        # the pisound JACK is a system service with its own period: switch it at runtime, back on exit
+        old=$(jack_period)
+        if [[ -z "$old" ]]; then
+            echo "Warning: cannot read the pisound JACK's period (jack_bufsize missing or JACK not running); JACK_PERIOD not applied."
+        elif [[ "$old" != "$JACK_PERIOD" ]]; then
+            if JACK_NO_START_SERVER=1 jack_bufsize "$JACK_PERIOD" >/dev/null 2>&1 && [[ "$(jack_period)" == "$JACK_PERIOD" ]]; then
+                PI_JACK_OLD_PERIOD=$old
+                echo "pisound JACK period: $old -> $JACK_PERIOD samples (restored on exit)."
+            else
+                echo "Warning: could not set the pisound JACK to $JACK_PERIOD samples; it stays at $old."
+            fi
+        else
+            echo "pisound JACK period: $old samples."
+        fi
     fi
 else
     # JACK_NO_START_SERVER: only ask, never let jack_lsp start a default server
     if JACK_NO_START_SERVER=1 jack_lsp &>/dev/null; then
         # its settings are not changed: a JACK started elsewhere keeps its own period (JACK_PERIOD does not apply)
-        echo "JACK is already running, using it$(command -v jack_bufsize >/dev/null && JACK_NO_START_SERVER=1 jack_bufsize 2>/dev/null | grep -o '[0-9]\+' | head -n 1 | sed 's/^/ (period: /; s/$/ samples)/')."
+        echo "JACK is already running, using it$(jack_period | sed 's/^/ (period: /; s/$/ samples)/')."
     else
         if [[ -z "$JACK_DEVICE" ]]; then
             SCARLETT_CARD=$(focusrite_card)
@@ -409,6 +440,7 @@ echo "SuperCollider exited (status $SCLANG_STATUS)."
 
 stop_ui_server
 restore_pi_jack
+restore_pi_jack_period
 stop_desktop_jack
 if [[ "$ON_PI" -eq 1 ]]; then
     report_pi_throttling "at exit"
